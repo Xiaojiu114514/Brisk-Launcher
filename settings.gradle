@@ -1,0 +1,4 @@
+rootProject.name = 'brisk-launcher'
+
+// 过渡期：Gradle 只负责 build / run / installDist 与 Maven 双构建验证；
+// jlink / jpackage 仍由 Maven（javafx-maven-plugin）负责，等 Gradle 打包稳定后再迁。

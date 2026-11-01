@@ -1,0 +1,64 @@
+# ---------- 构建产物 ----------
+build/
+target/
+out/
+*.class
+
+# ---------- 缓存 / 工具 ----------
+.cache/
+.gradle/
+.gradle-cache/
+.work/
+local/
+
+# ---------- IDE ----------
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.classpath
+.project
+
+# ---------- 运行期数据（绝不提交） ----------
+data/
+logs/
+themes/
+lang/
+plugins/
+secret.key
+accounts.json
+accounts-local.json
+launcher.json
+acks.json
+ui-state.json
+versionroots.json
+instances.json
+*.log
+*.tmp
+*.part
+
+# ---------- 敏感：微软客户端 ID ----------
+# 本地用 ClientIdEncoder 生成后填入下面这个文件；它不入库，示例文件入库
+src/main/java/com/brisklauncher/mcl/auth/impl/MicrosoftClientIdLocal.java
+!src/main/java/com/brisklauncher/mcl/auth/impl/MicrosoftClientIdLocal.java.example
+microsoft-client-id.txt
+*.key
+*.p12
+*.pfx
+*.jks
+
+# ---------- 分析/调试产物 ----------
+*.sparkprofile
+*.hprof
+*.jfr
+dump-*.txt
+
+# ---------- 审计工具产物 ----------
+.acl-recovery/
+
+# ---------- 系统垃圾 ----------
+Thumbs.db
+desktop.ini
+.DS_Store

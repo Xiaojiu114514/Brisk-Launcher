@@ -1,0 +1,20 @@
+package com.brisklauncher.mcl.auth.impl;
+
+/**
+ * 微軟登錄用的應用（客戶端）ID —— 範例檔。
+ *
+ * <p><b>本專案不內建任何 client id / appid。</b>
+ * 正式版會透過「設置 → 帳戶 → Microsoft 客戶端 ID」或環境變數
+ * {@code BRISK_MS_CLIENT_ID} 提供；源碼與發佈物裡都不會出現。
+ *
+ * <p>想在本機測試時，複製本檔為 {@code MicrosoftClientIdLocal.java}
+ * （已在 .gitignore 內，不會被提交），把 ID 填進 {@link #CLIENT_ID} 即可。
+ */
+public final class MicrosoftClientIdLocal {
+
+    /** 留空 = 不內建任何 ID（預設）。 */
+    public static final String CLIENT_ID = "";
+
+    private MicrosoftClientIdLocal() {
+    }
+}

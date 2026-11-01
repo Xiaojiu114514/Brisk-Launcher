@@ -1,0 +1,293 @@
+// ============================================================
+//  Brisk Launcher 璺?Gradle 閺嬪嫬缂撻敍鍫滅瑢 Maven 閸忚京鏁ら崥灞肩娴?src/main/java閿?
+//
+//  鐟曚焦鐪伴敍娆竢adle 8.10.2 + JDK 21閿涘澅oolchain閿?
+//  鐢摜鏁ら崨鎴掓姢閿?
+//    gradle build            # 缂傛牞鐦?+ 閹?jar
+//    gradle run              # 瀵偓閸欐垼绻嶇悰宀嬬礄缁涘鐜?mvn javafx:run閿?
+//    gradle installDist      # 閻㈢喐鍨?build/install/brisk-launcher 閸欘垳娲块幒銉ㄧ獓
+//    gradle run -Pmcl.home=E:\code\Brisk_Launcher\.work\data   # 閺佺増宓侀惄顔肩秿閺€鎯т紣娴ｆ粌灏?
+//
+//  鐠囧瓨妲戦敍姘侀崸妤€瀵查敍鍧皉c/main/java/module-info.java閿涘绻氶悾娆欑礉閹碘偓娴犮儳鏁?mainModule 鏉╂劘顢戦敍?
+//        jlink / jpackage 閺嗗倹妞傛禒宥堣泲 Maven閿涘瞼鐡?Gradle 娓氀吳旂€规艾鎮楅崘宥堢讣鏉╁洦娼甸妴?
+// ============================================================
+
+plugins {
+    id 'java'
+    id 'application'
+    id 'org.openjfx.javafxplugin' version '0.1.0'
+}
+
+group = 'com.brisklauncher'
+version = '1.0.0'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+javafx {
+    version = '21.0.4'
+    // 閸欘亞鏁ら崚?controls閿涘潛raphics/base 娴兼矮缍旀稉杞扮贩鐠ф牞鍤滈崝銊ョ敨娑撳绱?
+    modules = ['javafx.controls']
+}
+
+dependencies {
+    implementation 'org.glavo:webp:0.2.0'
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.17.2'
+    implementation 'net.java.dev.jna:jna-jpms:5.14.0'
+    implementation 'net.java.dev.jna:jna-platform-jpms:5.14.0'
+}
+
+application {
+    mainModule = 'com.brisklauncher.mcl'
+    mainClass = 'com.brisklauncher.mcl.MclApplication'
+    // 娑?pom.xml 闁插瞼娈戦崥顖氬З閸欏倹鏆熸穱婵囧瘮娑撯偓閼疯揪绱癠I 閸氼垰濮╅崳銊ょ瑝闂団偓鐟曚礁銇囬崼?
+    applicationDefaultJvmArgs = [
+            '-Xms16m',
+            '-Xmx192m',
+            '-XX:MaxMetaspaceSize=128m',
+            '-XX:ReservedCodeCacheSize=32m',
+            '-XX:CompressedClassSpaceSize=24m',
+            '-XX:+UseSerialGC',
+            '-XX:TieredStopAtLevel=1',
+            '-XX:CICompilerCount=1',
+            '-Xss512k',
+            '-XX:-UsePerfData',
+            '-Dhttps.protocols=TLSv1.2',
+            '-Djdk.httpclient.allowRestrictedHeaders=connection',
+            '-Djava.net.preferIPv4Stack=true'
+    ]
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 21
+    options.compilerArgs += ['-Xmaxerrs', '200']
+}
+
+tasks.withType(JavaExec).configureEach {
+    // gradle run 也限制堆上限：不加的话 JVM 預設堆是實體記憶體的 1/4，
+    // 在 32GB 機器上就會看到好幾 GB 的占用（用戶回報的 9GB 就像這樣）。
+    jvmArgs += ['-Xms16m', '-Xmx192m', '-XX:MaxMetaspaceSize=128m']
+    // 瀵偓閸欐垶婀￠幎濠冩殶閹诡喚娲拌ぐ鏇犳殌閸︺劌浼愭担婊冨隘閿涙radle run -Pmcl.home=...
+    def home = project.findProperty('mcl.home')
+    if (home) {
+        jvmArgs += ["-Dmcl.home=${home}"]
+    }
+    def lang = project.findProperty('mcl.lang')
+    if (lang) {
+        args += ["--lang=${lang}"]
+    }
+    def page = project.findProperty('mcl.page')
+    if (page) {
+        args += ["--page=${page}"]
+    }
+}
+
+// 娓?jpackage / 閹靛浼愰崚鍡楀絺瀵洜鏁ら敍姘Ω鏉╂劘顢戦弮鏈电贩鐠ф牗鏁归梿鍡楀煂娑撯偓娑擃亞娲拌ぐ?
+tasks.register('copyDependencies', Copy) {
+    from configurations.runtimeClasspath
+    into layout.buildDirectory.dir('dependencies')
+}
+
+// ============================================================
+//  閸掑棗褰傞敍姝玪ink 鏉╂劘顢戦弮鍫曟殔閸?+ jpackage 閸忓秴鐣ㄧ憗?exe
+//    gradle jlinkImage   閳?build/jlink            閿涘牐鍤滅敮?JRE閿涘瞼瀹?190MB 閻╊喖缍嶉敍?
+//    gradle jpackage     閳?build/jpackage/Brisk Launcher/Brisk Launcher.exe
+//    gradle exeZip       閳?build/distributions/Brisk-Launcher-<ver>-windows-x64.zip
+//  閺佹潙瀵橀崚鍡楀絺閿涙碍濡?build/jpackage 娑撳娈戦弫缈犻嚋閺傚洣娆㈡径鐧哥礄閹存牞袙閸?zip閿涘褰傜紒娆忓焼娴滅尨绱濋崣灞藉毊 exe 閸楀啿褰查妴?
+// ============================================================
+
+def jdk21Home = providers.provider {
+    javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(21) }
+            .get().metadata.installationPath.asFile.absolutePath
+}
+
+def launcherJvmArgs = [
+        '-Xms16m', '-Xmx192m', '-XX:MaxMetaspaceSize=128m',
+        '-XX:ReservedCodeCacheSize=32m', '-XX:CompressedClassSpaceSize=24m',
+        '-XX:+UseSerialGC', '-XX:TieredStopAtLevel=1', '-XX:CICompilerCount=1',
+        '-Xss512k', '-XX:-UsePerfData',
+        '-Dhttps.protocols=TLSv1.2',
+        '-Djdk.httpclient.allowRestrictedHeaders=connection',
+        '-Djava.net.preferIPv4Stack=true'
+]
+
+tasks.register('jlinkImage', Exec) {
+    group = 'distribution'
+    description = 'Build a jlink runtime image containing the launcher module'
+    dependsOn tasks.named('jar')
+
+    def outputDir = layout.buildDirectory.dir('jlink')
+    def jarFile = tasks.named('jar').flatMap { it.archiveFile }
+
+    doFirst {
+        delete outputDir
+        def jdkHome = jdk21Home.get()
+        def modulePath = ([jarFile.get().asFile] + configurations.runtimeClasspath.files)
+                .collect { it.absolutePath }.join(File.pathSeparator)
+        commandLine "${jdkHome}/bin/jlink",
+                '--module-path', modulePath,
+                '--add-modules', 'com.brisklauncher.mcl',
+                // bind-services閿涙碍濡?jdk.crypto.ec 缁涘婀囬崝鈩冨絹娓氭稖鈧懏膩閸ф鎽兼潻娑欐降閿涘苯鎯侀崚?TLS 閹烩剝澧滄径杈Е
+                '--bind-services',
+                '--strip-debug', '--no-header-files', '--no-man-pages',
+                '--compress=2',
+                '--output', outputDir.get().asFile.absolutePath
+    }
+}
+
+tasks.register('jpackage', Exec) {
+    group = 'distribution'
+    description = 'Build a portable Windows app image (exe) with jpackage'
+    dependsOn tasks.named('jlinkImage'), tasks.named('jar')
+
+    def outputDir = layout.buildDirectory.dir('jpackage')
+    def runtimeImage = layout.buildDirectory.dir('jlink')
+    def icon = file('src/main/resources/icon.ico')
+
+    doFirst {
+        delete outputDir
+        def jdkHome = jdk21Home.get()
+        def args = ["${jdkHome}/bin/jpackage".toString(),
+                    '--type', 'app-image',
+                    '--name', 'Brisk Launcher',
+                    '--app-version', project.version.toString(),
+                    '--vendor', 'Brisk',
+                    '--runtime-image', runtimeImage.get().asFile.absolutePath,
+                    '--module', 'com.brisklauncher.mcl/com.brisklauncher.mcl.MclApplication',
+                    '--dest', outputDir.get().asFile.absolutePath]
+        if (icon.isFile()) {
+            args += ['--icon', icon.absolutePath]
+        }
+        // 閹烘帗鐓￠妴灞炬綀闂?/ 閹垫挷绗夊鈧惄顔肩秿閵嗗秵妞傞悽顭掔窗gradle jpackage -Pconsole
+        if (project.hasProperty('console')) {
+            args += ['--win-console']
+        }
+        args += ['--java-options', '-Djavafx.cachedir=data/native/javafx']
+        args += ['--java-options', '-Djna.tmpdir=data/native/jna']
+        launcherJvmArgs.each { args += ['--java-options', it] }
+        commandLine args
+    }
+}
+
+// exe 閺堫兛缍嬮弰顖涙弓缁涙儳鎮曢惃?jpackage stub閿涘苯鐣ㄩ崗銊ㄨ拫娴犺泛鐖堕幎濠傜暊鐎佃鐖堕幋蹇曟窗瑜版洜娈戦崘娆忓弳閹凤附甯€閿?
+// 閻?runtime\bin\javaw.exe 閸氼垰濮╅敍鍫滅瑢 HMCL 娑撯偓閺嶉鏁辩粵鎯ф倳鏉╁洨娈?java.exe 閸愭瑦鏋冩禒璁圭礆鐏忚鲸顒滅敮鎼炩偓?
+// 鏉╂瑩鍣烽崷?app image 闁插矁藟娑撱倓閲滈崥顖氬З閼存碍婀伴敍灞藉瀻閸欐垹绮伴悳鈺侇啀閺冩湹绱崗鍫㈡暏鐎瑰啩婊戦妴?
+tasks.register('launcherScripts', Copy) {
+    group = 'distribution'
+    description = 'Copy bat/vbs launchers (distribution/) into the app image'
+    dependsOn tasks.named('jpackage')
+    mustRunAfter tasks.named('jpackage')
+    from layout.projectDirectory.dir('src/dist')
+    into layout.buildDirectory.dir('jpackage/Brisk Launcher')
+}
+
+tasks.register('exeZip', Zip) {
+    group = 'distribution'
+    description = 'Zip the jpackage app image for distribution'
+    dependsOn tasks.named('jpackage'), tasks.named('launcherScripts')
+    from layout.buildDirectory.dir('jpackage')
+    archiveFileName = "Brisk-Launcher-${project.version}-windows-x64.zip"
+    destinationDirectory = layout.buildDirectory.dir('distributions')
+}
+
+// 閼奉亝顥呴崗銉ュ經閿涘牅绗夐棁鈧憰?UI閿涘绱癵radle selftest
+tasks.register('selftest', JavaExec) {
+    group = 'verification'
+    description = 'Run the built-in SelfTest (no UI)'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.brisklauncher.mcl.SelfTest'
+}
+
+// ============================================================
+//  installDist 閻楀牊婀伴敍鍫滅瑝娓氭繆绂?jpackage閿涘绱扮紒?bin 鐞涖儰绔存稉顏呮￥姒涙垶顢嬮崥顖氬З閼存碍婀?
+//    build\install\brisk-launcher\bin\start.vbs  閳?閸掑棗褰傞弮鎯邦唨閻溾晛顔嶉崣灞藉毊鏉╂瑤閲?
+//  濞夈劍鍓伴敍姝﹏stallDist 娑撳秷鍤滅敮?JRE閿涘瞼娲伴弽鍥ㄦ簚閸ｃ劑娓剁憰浣筋棅 Java 21閵?
+// ============================================================
+// ============================================================
+//  閸楁洘鏋冩禒?exe閿涙nstallDist 娴溠呭⒖ + launcher.cmd閿涘牆鎯?Java 21 濡偓濞?閼奉亜濮╃€瑰顥婇敍?
+//    gradle bundleExe  閳?build\distributions\Brisk-Launcher.exe
+//  娴兼ê鍘涢悽?7-Zip SFX閿涙稒澹樻稉宥呭煂 7z 鐏忚鲸褰佺粈鐑樻暭閻?installDist 閸掑棗褰傞妴?
+// ============================================================
+tasks.register('bundleExe') {
+    group = 'distribution'
+    description = 'Pack installDist + start.vbs/launcher.cmd into one self-extracting exe'
+    dependsOn tasks.named('installDist')
+    outputs.upToDateWhen { false }
+    doLast {
+        def sevenZip = file('C:/Program Files/7-Zip/7z.exe')
+        def sfxModule = file('C:/Program Files/7-Zip/7z.sfx')
+        if (!sevenZip.isFile() || !sfxModule.isFile()) { throw new GradleException('7-Zip not found') }
+        def staging = layout.buildDirectory.dir('bundle').get().asFile
+        def outDir = layout.buildDirectory.dir('distributions').get().asFile
+        delete staging
+        def appDir = new File(staging, 'Brisk Launcher')
+        appDir.mkdirs()
+        copy { from layout.buildDirectory.dir('install/brisk-launcher'); into appDir }
+        new File(staging, 'config.txt').setText(';!@Install@!UTF-8!' + (char)13 + (char)10 + 'Title="Brisk Launcher"' + (char)13 + (char)10 + 'RunProgram="Brisk Launcher\\Brisk Launcher.exe"' + (char)13 + (char)10 + 'GUIMode="1"' + (char)13 + (char)10 + ';!@InstallEnd@!' + (char)13 + (char)10, 'UTF-8')
+        outDir.mkdirs()
+        def output = new File(outDir, 'Brisk-Launcher.exe')
+        delete output
+        exec {
+            workingDir staging
+            commandLine sevenZip.absolutePath, 'a', '-t7z', '-mx=9', '-sfx' + sfxModule.absolutePath, output.absolutePath, 'config.txt', 'Brisk Launcher'
+        }
+        logger.lifecycle('exe: ' + output.absolutePath + ' ' + (output.length() / 1048576.0).round(1) + ' MB')
+    }
+}
+tasks.named('installDist') {
+    outputs.upToDateWhen { false }
+    // 這個目錄同時是「開發期實際運行」的目錄，gradle 預設會把它同步成只剩發行內容：
+    // 每次重編都會刪掉 data/（cache、原生庫、語言包…），而且遊戲正在跑時
+    // authlib-injector 被 javaagent 佔用 → 整個 BUILD FAILED。
+    // preserve 讓 data/ 原地保留，不參與同步。
+    preserve {
+        include 'data/**'
+    }
+    doLast {
+        copy {
+            from layout.projectDirectory.dir('src/dist')
+            into layout.buildDirectory.dir('install/brisk-launcher')
+        }
+    }
+}
+
+
+// ============================================================
+//  閸掑棗褰傝ぐ銏♀偓渚婄窗build/install/brisk-launcher + 缁崵绮?Java 21
+//  閿涘牅绗夐悽?jpackage閿涙link 閸戠儤娼甸惃?runtime 缁涙儳鎮曟径杈ㄦ櫏閿涘奔绱扮悮顐㈢暔閸忋劏钂嬫禒鑸靛閸愭瑱绱?
+// ============================================================
+tasks.register("installLauncherScripts") {
+    group = "distribution"
+    description = "Copy the launcher entry scripts (src/dist) into installDist"
+    dependsOn tasks.named("installDist")
+    outputs.upToDateWhen { false }
+    doLast {
+        def dir = layout.buildDirectory.dir("install/brisk-launcher").get().asFile
+        if (!dir.isDirectory()) { return }
+        // 娓呮帀鍘嗗彶閬楃暀鐨勬棫鍏ュ彛鍚嶏紝閬垮厤鐩綍閲屽嚭鐜板洓涓惎鍔ㄨ剼鏈?
+        delete(new File(dir, "start.vbs"))
+        delete(new File(dir, "launcher.cmd"))
+        copy { from layout.projectDirectory.dir("src/dist"); into dir }
+        logger.lifecycle("launcher entry scripts copied")
+    }
+}
+
+// 鍙戝竷浜х墿锛氭妸鍙繍琛岀洰褰曟墦鎴?zip锛堜笉鍚繍琛屾湡 data/锛?
+tasks.register("releaseZip", Zip) {
+    group = "distribution"
+    description = "Zip the runnable installDist folder for release (excludes runtime data/)"
+    dependsOn tasks.named("installDist"), tasks.named("installLauncherScripts")
+    archiveFileName = "Brisk-Launcher-${project.version}-windows-x64.zip"
+    destinationDirectory = layout.buildDirectory.dir("distributions")
+    from layout.buildDirectory.dir("install/brisk-launcher")
+    exclude "data/**"
+    outputs.upToDateWhen { false }
+}

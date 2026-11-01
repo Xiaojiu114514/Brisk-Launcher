@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.brisklauncher</groupId>
+    <artifactId>mcl</artifactId>
+    <version>1.0.0</version>
+    <packaging>jar</packaging>
+    <name>Brisk Launcher</name>
+
+    <properties>
+        <maven.compiler.release>21</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <javafx.version>21.0.4</javafx.version>
+        <jackson.version>2.17.2</jackson.version>
+        <jna.version>5.14.0</jna.version>
+    </properties>
+
+    <dependencies>
+    <dependency>
+      <groupId>org.glavo</groupId>
+      <artifactId>webp</artifactId>
+      <version>0.2.0</version>
+    </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-controls</artifactId>
+            <version>${javafx.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+        <!-- JNA 官方 JPMS 变体 -->
+        <dependency>
+            <groupId>net.java.dev.jna</groupId>
+            <artifactId>jna-jpms</artifactId>
+            <version>${jna.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>net.java.dev.jna</groupId>
+            <artifactId>jna-platform-jpms</artifactId>
+            <version>${jna.version}</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+            </plugin>
+            <plugin>
+                <groupId>org.openjfx</groupId>
+                <artifactId>javafx-maven-plugin</artifactId>
+                <version>0.0.8</version>
+                <configuration>
+                    <mainClass>com.brisklauncher.mcl/com.brisklauncher.mcl.MclApplication</mainClass>
+                    <launcher>mcl</launcher>
+                    <jlinkImageName>mcl-image</jlinkImageName>
+                    <jlinkZipName>mcl-image</jlinkZipName>
+                    <!-- 关键：把 jdk.crypto.ec 等服务提供者模块链进镜像，否则 TLS 握手会失败 -->
+                    <bindServices>true</bindServices>
+                    <!-- 只是桌面启动器：去掉调试符号/头文件/手册页，镜像更小、解压更快 -->
+                    <stripDebug>true</stripDebug>
+                    <noHeaderFiles>true</noHeaderFiles>
+                    <noManPages>true</noManPages>
+                    <options>
+                        <!-- 启动器只是 UI，限制堆与元空间，避免一启动就占几百 MB -->
+                        <option>-Xms16m</option>
+                        <option>-Xmx192m</option>
+                        <option>-XX:MaxMetaspaceSize=128m</option>
+                        <option>-XX:ReservedCodeCacheSize=32m</option>
+                        <option>-XX:CompressedClassSpaceSize=24m</option>
+                        <option>-XX:+UseSerialGC</option>
+                        <option>-XX:TieredStopAtLevel=1</option>
+                        <option>-XX:CICompilerCount=1</option>
+                        <option>-Xss512k</option>
+                        <option>-XX:-UsePerfData</option>
+                        <!-- javafx.cachedir 由 MclApplication.main() 设成「启动器数据目录/native/javafx」
+                             的绝对路径：这里再写相对路径会让 JavaFX 把原生库解压到当前工作目录。 -->
+                        <!-- 强制使用 TLS 1.2，防止部分节点对 TLS 1.3 的 SNI 阻断 -->
+                        <option>-Dhttps.protocols=TLSv1.2</option>
+                        <!-- 允许绕过部分 HTTP 头限制 -->
+                        <option>-Djdk.httpclient.allowRestrictedHeaders=connection</option>
+                        <!-- 强制优先 IPv4 -->
+                        <option>-Djava.net.preferIPv4Stack=true</option>
+                    </options>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>jlink-image</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>jlink</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
