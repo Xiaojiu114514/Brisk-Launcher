@@ -3,8 +3,8 @@ package com.brisklauncher.mcl.plugin.builtin;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.brisklauncher.mcl.i18n.I18n;
 import com.brisklauncher.mcl.net.Http;
-import com.brisklauncher.mcl.plugin.LauncherPlugin;
-import com.brisklauncher.mcl.plugin.PluginContext;
+import com.brisklauncher.mcl.plugin.api.LauncherPlugin;
+import com.brisklauncher.mcl.plugin.api.PluginContext;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -133,7 +133,7 @@ public final class PlayerSkinPlugin implements LauncherPlugin {
     }
 
     @Override
-    public void dispose() {
+    public void onUnload() {
         disposed = true;
     }
 
@@ -148,7 +148,7 @@ public final class PlayerSkinPlugin implements LauncherPlugin {
             String rawId = user.path("id").asText("");
             String realName = user.path("name").asText(name);
             if (rawId.isBlank()) {
-                return new Profile(name, "", "", "", "", null, "找不到这个正版玩家");
+                return new Profile(name, "", "", "", "", null, com.brisklauncher.mcl.i18n.I18n.t("tools.skin.not_found"));
             }
             JsonNode session = Http.getJson(
                     java.net.URI.create("https://sessionserver.mojang.com/session/minecraft/profile/"
@@ -187,9 +187,9 @@ public final class PlayerSkinPlugin implements LauncherPlugin {
             String message = error.getMessage() == null ? error.getClass().getSimpleName()
                     : error.getMessage();
             if (message.contains("404")) {
-                message = "找不到这个正版玩家（或名字拼错）";
+                message = com.brisklauncher.mcl.i18n.I18n.t("tools.skin.not_found_hint");
             } else if (message.contains("429")) {
-                message = "查询太频繁（Mojang 限流），稍等一分钟再试";
+                message = com.brisklauncher.mcl.i18n.I18n.t("tools.skin.rate_limited");
             }
             return new Profile(name, "", "", "", "", null, message);
         }
@@ -201,7 +201,7 @@ public final class PlayerSkinPlugin implements LauncherPlugin {
         result.getChildren().clear();
         if (!profile.ok()) {
             Label fail = new Label("⚠ " + profile.error());
-            fail.setStyle("-fx-text-fill: #0F7C72; -fx-font-weight: bold;");
+            fail.setStyle("-fx-text-fill: -brisk-accent-2; -fx-font-weight: bold;");
             fail.setWrapText(true);
             result.getChildren().add(fail);
             return;
@@ -227,7 +227,7 @@ public final class PlayerSkinPlugin implements LauncherPlugin {
         }
 
         Label title = new Label(profile.name());
-        title.setStyle("-fx-font-size: 17px; -fx-font-weight: bold; -fx-text-fill: #14453F;");
+        title.setStyle("-fx-font-size: 17px; -fx-font-weight: bold; -fx-text-fill: -brisk-text;");
         Label uuid = new Label("UUID  " + profile.uuid());
         uuid.getStyleClass().add("instance-meta");
         Label model = new Label(I18n.t("tools.skin.model",

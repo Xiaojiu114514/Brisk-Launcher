@@ -13,7 +13,11 @@ public record InstallProgress(Stage stage, double progress, String detail) {
         LOADER,
         JAVA,
         FINISHING,
-        DONE
+        DONE,
+        /** 自动更新：下载新版本更新包。 */
+        UPDATE_DOWNLOAD,
+        /** 自动更新：解压缩并检查更新包。 */
+        UPDATE_EXTRACT
     }
 
     public static InstallProgress of(Stage stage) {

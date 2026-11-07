@@ -66,7 +66,7 @@ public final class ConfigEditorDialog {
         dialog.setTitle(I18n.t("config.title"));
 
         Label title = new Label("⚙ " + I18n.t("config.title") + " · " + file.getFileName());
-        title.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #14453F;");
+        title.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: -brisk-text;");
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
         Button close = UiKit.closeButtonStyled();
@@ -143,7 +143,7 @@ public final class ConfigEditorDialog {
                 int row = 0;
                 for (ConfigDocument.Field field : section.fields()) {
                     Label key = new Label(field.key());
-                    key.setStyle("-fx-font-weight: bold; -fx-text-fill: #14453F;");
+                    key.setStyle("-fx-font-weight: bold; -fx-text-fill: -brisk-text;");
                     key.setMinWidth(180);
                     if (field.comment() != null && !field.comment().isBlank()) {
                         Tooltip.install(key, new Tooltip(field.comment()));
@@ -258,8 +258,8 @@ public final class ConfigEditorDialog {
         root.setCenter(content);
         BorderPane.setMargin(content, new Insets(0, 0, 8, 0));
         root.setBottom(footer);
-        root.setStyle("-fx-background-color: #F4FCFA; -fx-background-radius: 12;"
-                + " -fx-border-color: #BFE9E2; -fx-border-radius: 12;"
+        root.setStyle("-fx-background-color: -brisk-bg; -fx-background-radius: 12;"
+                + " -fx-border-color: -brisk-border; -fx-border-radius: 12;"
                 + " -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.2), 15, 0, 0, 5);");
         // 用主题样式覆盖 TextArea / TitledPane / ScrollPane 的系统灰底
         root.getStyleClass().add("config-shell");

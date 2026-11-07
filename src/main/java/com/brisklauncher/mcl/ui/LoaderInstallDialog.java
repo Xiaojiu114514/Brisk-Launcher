@@ -42,7 +42,7 @@ public final class LoaderInstallDialog {
       dialog.initStyle(StageStyle.TRANSPARENT);
       String var10002 = I18n.t("loader.title");
       Label title = new Label("\ud83e\udde9 " + var10002 + " · " + entry.mcVersion());
-      title.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #14453F;");
+      title.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: -brisk-text;");
       Button close = UiKit.closeButtonStyled();
       close.getStyleClass().addAll(new String[]{"window-button", "window-close"});
       close.setOnAction((e) -> dialog.close());
@@ -198,7 +198,7 @@ public final class LoaderInstallDialog {
       VBox root = new VBox((double)14.0F, new Node[]{header, new Label(I18n.t("download.loader_type")), typeRow, new Label(I18n.t("download.loader_version")), versionCombo, fabricApiRow, install, status, newHint, hint});
       root.setPadding(new Insets((double)20.0F));
       root.setPrefWidth((double)520.0F);
-      root.setStyle("-fx-background-color: #F4FCFA; -fx-background-radius: 12; -fx-border-color: #BFE9E2; -fx-border-radius: 12; -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.2), 15, 0, 0, 5);");
+      root.setStyle("-fx-background-color: -brisk-bg; -fx-background-radius: 12; -fx-border-color: -brisk-border; -fx-border-radius: 12; -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.2), 15, 0, 0, 5);");
       Scene scene = new Scene(root, (double)520.0F, (double)400.0F);
       UiKit.applyTheme(scene);
       scene.setFill(Color.TRANSPARENT);

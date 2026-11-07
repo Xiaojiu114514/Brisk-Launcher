@@ -33,7 +33,7 @@ public final class DownloadBench {
                 LauncherSettings.Source.OFFICIAL)) {
             for (int concurrency : new int[]{4, 12}) {
                 LauncherSettings settings = new LauncherSettings(source, "", concurrency, 0, 20,
-                        "zh_CN", true, 4096, false, "", "", false, "", false, "github", "");
+                        "zh_CN", true, 4096, false, "", "", false, "", false, false, "github", "");
                 MirrorResolver mirrors = new MirrorResolver(settings);
                 HttpDownloader downloader = new HttpDownloader(concurrency, 0, 20);
                 Path dir = home.resolve("bench").resolve(source + "-" + concurrency);

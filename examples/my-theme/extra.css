@@ -1,0 +1,23 @@
+/* 第二份 CSS：只放「不涉及颜色」的规则，示范 styles 多文件叠加。
+ *
+ * 颜色一律走 -brisk-*（在 theme.css 里定义），这样就算以后换色也不用改这里。
+ */
+
+.card {
+    -fx-border-width: 1;
+    -fx-border-radius: 14;
+    -fx-effect: none;
+}
+
+.list-cell {
+    -fx-padding: 6 8 6 8;
+}
+
+.nav-button {
+    -fx-font-weight: bold;
+}
+
+.primary-button {
+    -fx-effect: none;
+    -fx-border-radius: 12;
+}

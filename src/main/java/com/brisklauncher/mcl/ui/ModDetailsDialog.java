@@ -65,7 +65,7 @@ public final class ModDetailsDialog {
         dialog.initStyle(StageStyle.TRANSPARENT);
 
         Label titleLabel = new Label("✦ " + I18n.t("content.details"));
-        titleLabel.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #14453F;");
+        titleLabel.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: -brisk-text;");
 
         Label projectLabel = new Label(projectId);
         projectLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 14px;");
@@ -161,8 +161,8 @@ public final class ModDetailsDialog {
 
         VBox root = new VBox(12, header, projectRow, versions, buttons);
         root.setPadding(new Insets(20));
-        root.setStyle("-fx-background-color: #F4FCFA; -fx-background-radius: 12;"
-                + " -fx-border-color: #BFE9E2; -fx-border-radius: 12;"
+        root.setStyle("-fx-background-color: -brisk-bg; -fx-background-radius: 12;"
+                + " -fx-border-color: -brisk-border; -fx-border-radius: 12;"
                 + " -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.2), 15, 0, 0, 5);");
         Scene scene = new Scene(root);
         UiKit.applyTheme(scene);

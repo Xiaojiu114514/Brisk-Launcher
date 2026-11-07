@@ -64,12 +64,12 @@ public final class NetworkNoticeDialog {
         dialog.initStyle(StageStyle.TRANSPARENT);
 
         Label title = new Label("🌐 " + I18n.t("network.notice.title"));
-        title.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #14453F;");
+        title.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: -brisk-text;");
 
         Label intro = new Label(I18n.t("network.notice.intro"));
         intro.setWrapText(true);
         intro.setMaxWidth(560);
-        intro.setStyle("-fx-text-fill: #4A6A66; -fx-font-size: 13px;");
+        intro.setStyle("-fx-text-fill: -brisk-text-muted; -fx-font-size: 13px;");
 
         CheckBox crashRules = new CheckBox(I18n.t("settings.crash.remote_update"));
         crashRules.setSelected(current.crashRuleRemoteUpdate());
@@ -79,22 +79,22 @@ public final class NetworkNoticeDialog {
         Label crashDesc = new Label(I18n.t("network.notice.crash_rules_desc"));
         crashDesc.setWrapText(true);
         crashDesc.setMaxWidth(520);
-        crashDesc.setStyle("-fx-text-fill: #6C8A85; -fx-font-size: 12px;");
+        crashDesc.setStyle("-fx-text-fill: -brisk-text-muted; -fx-font-size: 12px;");
         Label updateDesc = new Label(I18n.t("network.notice.update_desc"));
         updateDesc.setWrapText(true);
         updateDesc.setMaxWidth(520);
-        updateDesc.setStyle("-fx-text-fill: #6C8A85; -fx-font-size: 12px;");
+        updateDesc.setStyle("-fx-text-fill: -brisk-text-muted; -fx-font-size: 12px;");
 
         Label speedDesc = new Label(I18n.t("network.notice.speedtest_desc"));
         speedDesc.setWrapText(true);
         speedDesc.setMaxWidth(520);
-        speedDesc.setStyle("-fx-text-fill: #6C8A85; -fx-font-size: 12px;");
+        speedDesc.setStyle("-fx-text-fill: -brisk-text-muted; -fx-font-size: 12px;");
 
         Label privacy = new Label(I18n.t("network.notice.privacy"));
         privacy.setWrapText(true);
         privacy.setMaxWidth(560);
-        privacy.setStyle("-fx-text-fill: #14453F; -fx-font-size: 12.5px;"
-                + " -fx-background-color: #E8FAF6; -fx-background-radius: 8;"
+        privacy.setStyle("-fx-text-fill: -brisk-text; -fx-font-size: 12.5px;"
+                + " -fx-background-color: -brisk-topbar-from; -fx-background-radius: 8;"
                 + " -fx-padding: 10 12 10 12;");
 
         VBox crashBox = new VBox(4, crashRules, crashDesc);
@@ -131,8 +131,8 @@ public final class NetworkNoticeDialog {
 
         VBox root = new VBox(14, title, intro, crashBox, updateBox, speedBox, privacy, buttons);
         root.setPadding(new Insets(20));
-        root.setStyle("-fx-background-color: #F4FCFA; -fx-background-radius: 12;"
-                + " -fx-border-color: #BFE9E2; -fx-border-radius: 12;"
+        root.setStyle("-fx-background-color: -brisk-bg; -fx-background-radius: 12;"
+                + " -fx-border-color: -brisk-border; -fx-border-radius: 12;"
                 + " -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.2), 15, 0, 0, 5);");
         root.setMaxWidth(600);
 

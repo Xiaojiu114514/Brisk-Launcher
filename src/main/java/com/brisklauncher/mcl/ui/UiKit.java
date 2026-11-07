@@ -75,20 +75,16 @@ public final class UiKit {
         if (!scene.getStylesheets().contains(css)) {
             scene.getStylesheets().add(css);
         }
-        // 玩家自订主题：额外叠一段 CSS（放在最后，优先级高于预设主题）
-        var themeCss = com.brisklauncher.mcl.setting.Packs.currentThemeCss();
-        if (themeCss != null && java.nio.file.Files.isRegularFile(themeCss)) {
-            // 安全审计 v3 A-14：主题包是「别人给的档案」，而 JavaFX CSS 的 url()
-            // 支持 http(s)/file/jar —— 等于让主题包能发任意请求（隐私信标）、
-            // 读本地文件、甚至把远端字体喂给字体解析器。加载前先做静态检查。
-            if (!ThemeCssGuard.allowed(themeCss)) {
-                return;
-            }
-            String custom = themeCss.toUri().toString();
+        // 玩家自订主题：叠一段（或多段）CSS，放在最后，优先级高于预设主题。
+        // 清单 / 安全扫描 / URI 都在 ThemePacks 里按签名快取，这里每次只拿结果，不重读档案。
+        for (String custom : com.brisklauncher.mcl.setting.ThemePacks.cssUris()) {
             if (!scene.getStylesheets().contains(custom)) {
                 scene.getStylesheets().add(custom);
             }
         }
+        // 视窗 / 工作列图示：主题自带 logo 就跟着主题走，否则用内建樱花方块。
+        // （系统图示没法染色，但换图是可行的 —— Stage.getIcons() 支持执行期替换。）
+        ThemeLogo.applyWindowIcons(scene.getWindow());
     }
 
     /**
@@ -120,8 +116,8 @@ public final class UiKit {
         button.setMinWidth(javafx.scene.layout.Region.USE_PREF_SIZE);
         button.setPrefHeight(30);
         button.setMinHeight(30);
-        // 直接给文字色：主题包如果把 .window-button 的 text-fill 改透明，按钮就“消失”了
-        button.setTextFill(javafx.scene.paint.Color.web("#1C5A54"));
+        // 用设计变量给文字色：主题换了颜色会跟着变，但也不会被主题写成透明而「消失」
+        button.setStyle("-fx-text-fill: -brisk-text-body;");
         return button;
     }
     public static <T extends javafx.scene.control.Labeled> T noShrink(T control) {

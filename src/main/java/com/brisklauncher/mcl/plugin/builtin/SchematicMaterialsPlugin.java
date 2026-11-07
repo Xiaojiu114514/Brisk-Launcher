@@ -1,8 +1,8 @@
 package com.brisklauncher.mcl.plugin.builtin;
 
 import com.brisklauncher.mcl.i18n.I18n;
-import com.brisklauncher.mcl.plugin.LauncherPlugin;
-import com.brisklauncher.mcl.plugin.PluginContext;
+import com.brisklauncher.mcl.plugin.api.LauncherPlugin;
+import com.brisklauncher.mcl.plugin.api.PluginContext;
 import com.brisklauncher.mcl.ui.UiKit;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
@@ -77,7 +77,7 @@ public final class SchematicMaterialsPlugin implements LauncherPlugin {
 
         Label summary = new Label();
         summary.setWrapText(true);
-        summary.setStyle("-fx-font-size: 13px; -fx-text-fill: #14453F;");
+        summary.setStyle("-fx-font-size: 13px; -fx-text-fill: -brisk-text;");
 
         GridPane table = new GridPane();
         table.setHgap(18);
@@ -456,7 +456,7 @@ public final class SchematicMaterialsPlugin implements LauncherPlugin {
 
     private static Label header(String text) {
         Label label = new Label(text);
-        label.setStyle("-fx-font-weight: bold; -fx-text-fill: #14453F;");
+        label.setStyle("-fx-font-weight: bold; -fx-text-fill: -brisk-text;");
         return label;
     }
 

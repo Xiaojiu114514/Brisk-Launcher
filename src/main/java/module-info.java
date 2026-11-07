@@ -6,8 +6,9 @@ module com.brisklauncher.mcl {
     requires java.management;
     requires java.net.http;
     requires java.desktop;
-    requires javafx.controls;
-    requires com.fasterxml.jackson.databind;
+    // 插件 API 会暴露 JavaFX / Jackson 类型，所以对下游要 transitive
+    requires transitive javafx.controls;
+    requires transitive com.fasterxml.jackson.databind;
     requires com.sun.jna;
     requires com.sun.jna.platform;
 
@@ -15,8 +16,8 @@ module com.brisklauncher.mcl {
     exports com.brisklauncher.mcl;
     exports com.brisklauncher.mcl.auth.api;
     exports com.brisklauncher.mcl.i18n;
-    // 插件 API：外部插件 jar 只认这个包（工俱页 / data/plugins）
-    exports com.brisklauncher.mcl.plugin;
+    // 插件 API：外部插件 jar 只认这个包（工具页 / 导航页 / data/plugins）
+    exports com.brisklauncher.mcl.plugin.api;
 
     opens com.brisklauncher.mcl to javafx.graphics;
     opens com.brisklauncher.mcl.auth.api    to com.fasterxml.jackson.databind;

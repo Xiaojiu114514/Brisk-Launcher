@@ -3,8 +3,8 @@ package com.brisklauncher.mcl.plugin.builtin;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.brisklauncher.mcl.i18n.I18n;
 import com.brisklauncher.mcl.net.Http;
-import com.brisklauncher.mcl.plugin.LauncherPlugin;
-import com.brisklauncher.mcl.plugin.PluginContext;
+import com.brisklauncher.mcl.plugin.api.LauncherPlugin;
+import com.brisklauncher.mcl.plugin.api.PluginContext;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -147,7 +147,7 @@ public final class ServerPingPlugin implements LauncherPlugin {
     }
 
     @Override
-    public void dispose() {
+    public void onUnload() {
         disposed = true;
     }
 
@@ -157,14 +157,14 @@ public final class ServerPingPlugin implements LauncherPlugin {
         result.getChildren().clear();
         if (!status.ok()) {
             Label fail = new Label("🔴 " + status.error());
-            fail.setStyle("-fx-text-fill: #0F7C72; -fx-font-weight: bold;");
+            fail.setStyle("-fx-text-fill: -brisk-accent-2; -fx-font-weight: bold;");
             fail.setWrapText(true);
             result.getChildren().add(fail);
             return;
         }
         Label header = new Label("🟢 " + status.host() + ":" + status.port()
                 + "   ·   " + I18n.t("tools.ping.latency", status.latencyMs()));
-        header.setStyle("-fx-font-size: 15px; -fx-font-weight: bold; -fx-text-fill: #2E8B62;");
+        header.setStyle("-fx-font-size: 15px; -fx-font-weight: bold; -fx-text-fill: -brisk-ok;");
 
         javafx.scene.layout.StackPane icon = new javafx.scene.layout.StackPane();
         icon.setMinSize(64, 64);

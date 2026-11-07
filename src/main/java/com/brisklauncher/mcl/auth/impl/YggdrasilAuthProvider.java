@@ -248,7 +248,7 @@ public final class YggdrasilAuthProvider implements AuthProvider {
         HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(url))
                 .header("Content-Type", "application/json; charset=utf-8")
                 .header("Accept", "application/json")
-                .header("User-Agent", "BriskLauncher/1.0.0")
+                .header("User-Agent", "BriskLauncher/1.1.0")
                 .timeout(java.time.Duration.ofSeconds(30))
                 .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8));
         if (bearer != null) {

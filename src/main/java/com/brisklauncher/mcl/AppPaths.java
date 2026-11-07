@@ -134,6 +134,128 @@ public final class AppPaths {
         return detectAppDir();
     }
 
+    private static volatile Path cachedInstallDir;
+    private static volatile boolean installDirResolved;
+
+    /**
+     * 启动器安装目录（自动覆盖更新的目标根目录）。
+     *
+     * <p>与 {@link #appDir()} 不同：{@code launch.ps1} 是用「系统 JDK + --module-path lib」
+     * 启动的，行程的 java.exe 不在安装目录里，所以 {@link #appDir()} 抓不到；
+     * 自动更新一定得知道「lib/ 与入口脚本在哪」，因此另外用
+     * <ol>
+     *   <li>jpackage 的 {@code jpackage.app-path}；</li>
+     *   <li>程式码来源（installDist 的 {@code lib/xxx.jar}、jpackage 的 {@code app/xxx.jar}）；</li>
+     *   <li>工作目录（入口脚本会把 cwd 设成启动器目录）。</li>
+     * </ol>
+     * 只有「真的像启动器目录」（有 lib 或 app 的 jar + 入口脚本）才回传；
+     * 开发执行（classes 目录、专案根目录）一律回传 {@code null}，避免更新覆盖到原始码。
+     */
+    public static Path installDir() {
+        if (installDirResolved) {
+            return cachedInstallDir;
+        }
+        synchronized (AppPaths.class) {
+            if (!installDirResolved) {
+                cachedInstallDir = resolveInstallDir();
+                installDirResolved = true;
+            }
+            return cachedInstallDir;
+        }
+    }
+
+    private static Path resolveInstallDir() {
+        for (Path candidate : installDirCandidates()) {
+            if (looksLikeLauncherDir(candidate)) {
+                return candidate.toAbsolutePath().normalize();
+            }
+        }
+        return null;
+    }
+
+    private static List<Path> installDirCandidates() {
+        List<Path> candidates = new java.util.ArrayList<>();
+        // 1) jpackage：exe 自己会把路径给我们
+        try {
+            String jpackagePath = System.getProperty("jpackage.app-path");
+            if (jpackagePath != null && !jpackagePath.isBlank()) {
+                Path parent = Paths.get(jpackagePath).getParent();
+                if (parent != null) {
+                    candidates.add(parent);
+                }
+            }
+        } catch (Exception ignored) {
+            // 非 jpackage 执行
+        }
+        // 2) 程式码来源：lib/xxx.jar（installDist）或 app/xxx.jar（jpackage 模组）
+        try {
+            var source = AppPaths.class.getProtectionDomain().getCodeSource();
+            var location = source == null ? null : source.getLocation();
+            if (location != null && "file".equalsIgnoreCase(location.getProtocol())) {
+                Path code = Paths.get(location.toURI());
+                if (Files.isRegularFile(code)) {
+                    Path parent = code.getParent();
+                    String folder = parent == null ? "" : String.valueOf(parent.getFileName());
+                    if (parent != null && ("lib".equalsIgnoreCase(folder) || "app".equalsIgnoreCase(folder))) {
+                        Path root = parent.getParent();
+                        if (root != null) {
+                            candidates.add(root);
+                        }
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+            // 开发执行（classes 目录）或没有权限
+        }
+        // 3) 入口脚本设定的工作目录
+        try {
+            candidates.add(Paths.get(System.getProperty("user.dir", ".")));
+        } catch (Exception ignored) {
+            // 忽略
+        }
+        return candidates;
+    }
+
+    /** 是不是「可以覆盖更新」的启动器目录：有 lib/app 的 jar，而且有入口脚本。 */
+    private static boolean looksLikeLauncherDir(Path dir) {
+        if (dir == null) {
+            return false;
+        }
+        try {
+            String name = String.valueOf(dir.getFileName());
+            if ("classes".equalsIgnoreCase(name) || "build".equalsIgnoreCase(name)
+                    || "bin".equalsIgnoreCase(name) || "lib".equalsIgnoreCase(name)) {
+                return false;
+            }
+            boolean entry = Files.isRegularFile(dir.resolve("launch.ps1"))
+                    || Files.isRegularFile(dir.resolve("Brisk Launcher.exe"))
+                    || Files.isRegularFile(dir.resolve("Brisk Launcher.vbs"))
+                    // 单 exe 发行：只有这个 exe + data/ + minecraft/ + runtime/
+                    || Files.isRegularFile(dir.resolve("BriskLauncher.exe"))
+                    || Files.isRegularFile(dir.resolve("bin").resolve("brisk-launcher.bat"));
+            // installDist 有 lib/*.jar；单 exe 版把 jar 释放到 runtime/lib/；
+            // jpackage 的模组在 runtime 里，app/ 只有设定档
+            boolean body = hasJar(dir.resolve("lib"))
+                    || hasJar(dir.resolve("runtime").resolve("lib"))
+                    || (Files.isDirectory(dir.resolve("app")) && Files.isDirectory(dir.resolve("runtime")));
+            return entry && body;
+        } catch (Exception error) {
+            return false;
+        }
+    }
+
+    private static boolean hasJar(Path dir) {
+        if (!Files.isDirectory(dir)) {
+            return false;
+        }
+        try (var stream = Files.list(dir)) {
+            return stream.anyMatch(file -> file.getFileName().toString()
+                    .toLowerCase(Locale.ROOT).endsWith(".jar"));
+        } catch (Exception error) {
+            return false;
+        }
+    }
+
     /**
      * 「可搬移的大档案」统一放这里：启动器目录下的 {@code data/}。
      *
@@ -146,10 +268,63 @@ public final class AppPaths {
      * 并且密钥 / 确认记录 / 日志一律不放这儿。
      */
     public static Path dataDir() {
+        // 单 exe / 便携版：由启动器把数据目录定死在「exe 同级」，不要按 java.exe 的位置去猜。
+        String override = System.getProperty("mcl.dataDir");
+        if (override != null && !override.isBlank()) {
+            return normalize(Paths.get(override.trim()));
+        }
         Path app = detectAppDir();
         Path base = app != null ? app
                 : Paths.get(System.getProperty("user.dir", "."));
         return normalize(base.resolve("data"));
+    }
+
+    /**
+     * 账号目录：{@code accounts.json} 与「安装实例 id」都放这里。
+     *
+     * <p>默认跟着启动器数据根（开发/测试用）；单 exe 版由启动器传
+     * {@code -Dmcl.accountsDir=%LOCALAPPDATA%\BriskLauncher}，这样**不同路径的 exe 共用同一份账号**，
+     * 而且凭据管理器本来就是按 Windows 用户存的，两者才对得上。
+     */
+    public static Path accountsDir() {
+        String override = System.getProperty("mcl.accountsDir");
+        if (override != null && !override.isBlank()) {
+            return normalize(Paths.get(override.trim()));
+        }
+        return launcherRoot();
+    }
+
+    /** 账号清单（只有 uuid/名字/类型，不含令牌）。 */
+    public static Path accountsFile() {
+        return accountsDir().resolve("accounts.json");
+    }
+
+    /** 安装实例 id：与 accounts.json 同目录，保证「共用账号 = 共用凭据命名空间」。 */
+    public static Path instanceIdFile() {
+        return accountsDir().resolve("instance-id.txt");
+    }
+
+    /**
+     * 把旧位置（启动器数据根）的 accounts.json 搬到共享账号目录。
+     *
+     * <p>只在「目标还没有、旧位置有」时搬一次；搬完删掉旧的，避免两份账号各自漂移。
+     */
+    public static void migrateAccountsFile() {
+        try {
+            Path target = accountsFile();
+            Path legacy = launcherRoot().resolve("accounts.json");
+            if (target.equals(legacy) || Files.isRegularFile(target) || !Files.isRegularFile(legacy)) {
+                return;
+            }
+            Files.createDirectories(target.getParent());
+            Files.copy(legacy, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            Files.deleteIfExists(legacy);
+            com.brisklauncher.mcl.security.FilePerms.ensurePrivateFile(target);
+            com.brisklauncher.mcl.security.SafeLog.info("已把 accounts.json 迁移到共享账号目录");
+        } catch (Exception error) {
+            com.brisklauncher.mcl.security.SafeLog.warn(
+                    "迁移 accounts.json 失败：" + error.getClass().getSimpleName());
+        }
     }
 
     /** 私密小文件：密钥（仅当前用户可读）。 */
@@ -331,6 +506,16 @@ public final class AppPaths {
 
     private static Path detectAppDir() {
         try {
+            // 原生 exe（BriskBoot）会把「自己所在的目录」显式传进来。
+            // 没有这个覆盖时，命令行是 java.exe，下面的 bin 探测会误判成 JDK 目录，
+            // 于是 data/ 被建到 C:\Program Files\Java\... 里（不可写）。
+            String explicit = System.getProperty("mcl.appDir");
+            if (explicit != null && !explicit.isBlank()) {
+                Path dir = Paths.get(explicit.trim());
+                if (Files.isDirectory(dir)) {
+                    return normalize(dir);
+                }
+            }
             String jpackagePath = System.getProperty("jpackage.app-path");
             if (jpackagePath != null && !jpackagePath.isBlank()) {
                 Path exe = Paths.get(jpackagePath);
@@ -409,6 +594,8 @@ public final class AppPaths {
     }
 
     public static Path instancesDir()   { return launcherRoot().resolve("instances"); }
+    /** 每個插件自己的可寫資料夾根目錄（{@code data/plugin-data/<插件id>}）。 */
+    public static Path pluginDataRoot() { return dataDir().resolve("plugin-data"); }
     public static Path jdkDir()         { return dataDir().resolve("jdk"); }
     public static Path cacheDir()       { return dataDir().resolve("cache"); }
     public static Path themesDir()      { return dataDir().resolve("themes"); }

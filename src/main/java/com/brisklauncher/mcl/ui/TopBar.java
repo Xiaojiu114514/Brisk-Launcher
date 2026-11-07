@@ -26,6 +26,7 @@ import javafx.scene.layout.Region;
 import javafx.stage.Stage;
 import javafx.util.Duration;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 
@@ -37,6 +38,10 @@ public final class TopBar extends HBox {
 
     public static final List<String> NAV_KEYS = List.of(
             "launch", "download", "version", "online", "account", "tools", "settings");
+
+    /** 插件贡献的导航项（key 用 {@code PluginManager.pageKey}）。 */
+    public record NavItem(String key, String label) {
+    }
 
     private final Stage stage;
     private final MclContext context;
@@ -52,9 +57,18 @@ public final class TopBar extends HBox {
     private javafx.animation.Timeline poller;
     private Runnable onlineStateUnsubscribe;
     private Runnable accountUnsubscribe;
+    private Runnable themeUnsubscribe;
     private boolean disposed;
 
     public TopBar(Stage stage, String initialKey, Consumer<String> onNavigate, MclContext context) {
+        this(stage, initialKey, onNavigate, context, List.of());
+    }
+
+    /**
+     * @param extraNav 插件贡献的导航页，插在「工具」与「设置」之间
+     */
+    public TopBar(Stage stage, String initialKey, Consumer<String> onNavigate, MclContext context,
+                  List<NavItem> extraNav) {
         this.stage = stage;
         this.context = context;
         this.onNavigate = onNavigate;
@@ -64,12 +78,30 @@ public final class TopBar extends HBox {
         setPadding(new Insets(8, 8, 8, 14));
         setSpacing(14);
 
-        Label logo = new Label("⚡ Brisk");
-        logo.getStyleClass().add("logo");
+        // 品牌區：主題 logo（圖片）+ 字標（可用 theme.json 的 wordmark 關掉）+ 啟動器名稱小字（一定保留）
+        Label wordmark = new Label("Brisk");
+        wordmark.getStyleClass().add("logo");
         Label sub = new Label(I18n.t("topbar.brand"));
         sub.getStyleClass().add("logo-sub");
-        HBox brand = new HBox(6, logo, sub);
+
+        javafx.scene.image.ImageView brandIcon = new javafx.scene.image.ImageView();
+        brandIcon.setFitWidth(ThemeLogo.DISPLAY_SIZE);
+        brandIcon.setFitHeight(ThemeLogo.DISPLAY_SIZE);
+        brandIcon.setPreserveRatio(true);
+        brandIcon.setSmooth(true);
+        updateBrandIcon(brandIcon);
+        updateBrandWordmark(wordmark);
+
+        HBox brand = new HBox(7, brandIcon, wordmark, sub);
         brand.setAlignment(Pos.CENTER_LEFT);
+
+        // 切主題時換 logo 圖 + 字標開關（系統圖示由 UiKit.applyTheme → ThemeLogo 一起換）
+        themeUnsubscribe = com.brisklauncher.mcl.setting.ThemePacks.addThemeListener(
+                () -> Platform.runLater(() -> {
+                    ThemeLogo.invalidate();
+                    updateBrandIcon(brandIcon);
+                    updateBrandWordmark(wordmark);
+                }));
 
         navGroup.selectedToggleProperty().addListener((obs, oldToggle, newToggle) -> {
             if (newToggle == null && oldToggle != null) {
@@ -79,13 +111,23 @@ public final class TopBar extends HBox {
 
         HBox nav = new HBox(4);
         nav.setAlignment(Pos.CENTER_LEFT);
+        List<NavItem> items = new ArrayList<>();
         for (String key : NAV_KEYS) {
-            ToggleButton button = new ToggleButton(I18n.t("nav." + key));
+            if ("settings".equals(key) && extraNav != null) {
+                items.addAll(extraNav);
+            }
+            items.add(new NavItem(key, I18n.t("nav." + key)));
+        }
+        if (extraNav != null && !NAV_KEYS.contains("settings")) {
+            items.addAll(extraNav);
+        }
+        for (NavItem item : items) {
+            ToggleButton button = new ToggleButton(item.label());
             button.setToggleGroup(navGroup);
             button.getStyleClass().add("nav-button");
-            button.setUserData(key);
-            button.setOnAction(e -> onNavigate.accept(key));
-            if (key.equals(initialKey)) {
+            button.setUserData(item.key());
+            button.setOnAction(e -> onNavigate.accept(item.key()));
+            if (item.key().equals(initialKey)) {
                 button.setSelected(true);
             }
             nav.getChildren().add(button);
@@ -161,6 +203,10 @@ public final class TopBar extends HBox {
         if (accountUnsubscribe != null) {
             accountUnsubscribe.run();
             accountUnsubscribe = null;
+        }
+        if (themeUnsubscribe != null) {
+            themeUnsubscribe.run();
+            themeUnsubscribe = null;
         }
         navGroup.getToggles().clear();
         accountMenu.getItems().clear();
@@ -262,6 +308,29 @@ public final class TopBar extends HBox {
 
     public void refreshAccount() {
         refreshAccountMenu();
+    }
+
+    // ---------- 品牌 ----------
+
+    /** 換上目前主題的 logo（取不到圖就整張隱藏，不要留一個空白佔位）。 */
+    private static void updateBrandIcon(javafx.scene.image.ImageView view) {
+        javafx.scene.image.Image image = ThemeLogo.display();
+        boolean available = image != null && !image.isError();
+        view.setImage(available ? image : null);
+        view.setVisible(available);
+        view.setManaged(available);
+    }
+
+    /** 主題可以用 {@code "wordmark": false} 只留小字；內建主題一律顯示。 */
+    private static void updateBrandWordmark(Label wordmark) {
+        boolean show;
+        try {
+            show = com.brisklauncher.mcl.setting.ThemePacks.current().wordmark();
+        } catch (Throwable error) {
+            show = true;
+        }
+        wordmark.setVisible(show);
+        wordmark.setManaged(show);
     }
 
     private void installDrag() {

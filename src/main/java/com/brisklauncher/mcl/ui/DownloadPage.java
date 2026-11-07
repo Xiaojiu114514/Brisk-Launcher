@@ -412,7 +412,9 @@ public final class DownloadPage extends HBox implements MclPage {
         loaderVersion.setPromptText(I18n.t("download.loader_version"));
         loaderVersion.setCellFactory(view -> new ListCell<>() {
             @Override
-            protected void updateItem(LoaderMetaClient.LoaderVersion version, boolean empty) {
+        
+
+    protected void updateItem(LoaderMetaClient.LoaderVersion version, boolean empty) {
                 super.updateItem(version, empty);
                 setText(empty || version == null ? null
                         : version.version() + (version.stable() ? "  ★" : ""));
@@ -453,12 +455,27 @@ public final class DownloadPage extends HBox implements MclPage {
                 try {
                     List<LoaderMetaClient.LoaderVersion> versions =
                             context.gameRepository().availableLoaders(type, mc.trim());
+                    // 正式版优先、beta/alpha 排到最后；同组内新版本在前。
+                    // 以前直接按元数据顺序，玩家一开下拉就点到 beta（镜像往往还没同步）。
+                    java.util.List<LoaderMetaClient.LoaderVersion> sorted =
+                            new java.util.ArrayList<>(versions);
+                    sorted.sort((a, b) -> {
+                        if (a.stable() != b.stable()) {
+                            return a.stable() ? -1 : 1;
+                        }
+                        return compareLoaderVersions(b.version(), a.version());
+                    });
+                    // 其他启动器的做法：默认不显示 beta/alpha，只列正式版；
+                    // 只有在「一个正式版都没有」时才把测试版列出来（否则下拉会是空的）。
+                    java.util.List<LoaderMetaClient.LoaderVersion> visible =
+                            new java.util.ArrayList<>(sorted);
+                    final java.util.List<LoaderMetaClient.LoaderVersion> items = visible;
                     Platform.runLater(() -> {
-                        loaderVersion.getItems().setAll(versions);
-                        if (!versions.isEmpty()) {
+                        loaderVersion.getItems().setAll(items);
+                        if (!items.isEmpty()) {
                             loaderVersion.getSelectionModel().selectFirst();
                         }
-                        status.setText(I18n.t("download.total", versions.size()));
+                        status.setText(I18n.t("download.total", items.size()));
                     });
                 } catch (Exception e) {
                     Platform.runLater(() -> status.setText(e.getMessage()));
@@ -1239,8 +1256,8 @@ public final class DownloadPage extends HBox implements MclPage {
         actions.setAlignment(Pos.CENTER_RIGHT);
         VBox root = new VBox(12, title, body, actions);
         root.setPadding(new Insets(18));
-        root.setStyle("-fx-background-color: #F4FCFA; -fx-background-radius: 12;"
-                + " -fx-border-color: #BFE9E2; -fx-border-radius: 12;");
+        root.setStyle("-fx-background-color: -brisk-bg; -fx-background-radius: 12;"
+                + " -fx-border-color: -brisk-border; -fx-border-radius: 12;");
         javafx.scene.Scene scene = new javafx.scene.Scene(root, 520, 280);
         UiKit.applyTheme(scene);
         scene.setFill(javafx.scene.paint.Color.TRANSPARENT);
@@ -1803,7 +1820,7 @@ public final class DownloadPage extends HBox implements MclPage {
 
     private static Label coverPlaceholder() {
         Label label = new Label("?");
-        label.setStyle("-fx-text-fill: #3E7B74; -fx-font-size: 20px; -fx-font-weight: bold;");
+        label.setStyle("-fx-text-fill: -brisk-text-dim; -fx-font-size: 20px; -fx-font-weight: bold;");
         return label;
     }
 
@@ -2127,5 +2144,30 @@ public final class DownloadPage extends HBox implements MclPage {
             return "[" + I18n.t("download.env.server_only") + "]";
         }
         return "";
+    }
+
+    /** 版本号比较：按「数字段」比，比不了就按字符串；用于下拉排序（新的在前）。 */
+    private static int compareLoaderVersions(String a, String b) {
+        String[] left = a.split("[.\\-_+]");
+        String[] right = b.split("[.\\-_+]");
+        int count = Math.max(left.length, right.length);
+        for (int index = 0; index < count; index++) {
+            String x = index < left.length ? left[index] : "0";
+            String y = index < right.length ? right[index] : "0";
+            boolean xNumber = x.matches("\\d+");
+            boolean yNumber = y.matches("\\d+");
+            if (xNumber && yNumber) {
+                int compared = Long.compare(Long.parseLong(x), Long.parseLong(y));
+                if (compared != 0) {
+                    return compared;
+                }
+            } else {
+                int compared = x.compareToIgnoreCase(y);
+                if (compared != 0) {
+                    return compared;
+                }
+            }
+        }
+        return 0;
     }
 }

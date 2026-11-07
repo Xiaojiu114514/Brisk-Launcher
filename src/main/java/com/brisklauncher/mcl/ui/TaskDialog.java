@@ -58,7 +58,7 @@ public final class TaskDialog {
       footer.setAlignment(Pos.CENTER_RIGHT);
       VBox root = new VBox((double)10.0F, new Node[]{titleLabel, stageLabel, bar, detailLabel, footer});
       root.setPadding(new Insets((double)20.0F));
-      root.setStyle("-fx-background-color: #F4FCFA; -fx-background-radius: 12; -fx-border-color: #BFE9E2; -fx-border-radius: 12;");
+      root.setStyle("-fx-background-color: -brisk-bg; -fx-background-radius: 12; -fx-border-color: -brisk-border; -fx-border-radius: 12;");
       Scene scene = new Scene(root, (double)480.0F, (double)210.0F);
       UiKit.applyTheme(scene);
       scene.setFill(Color.TRANSPARENT);
@@ -86,7 +86,7 @@ public final class TaskDialog {
             bar.setVisible(false);
             stageLabel.setText(I18n.t("task.failed"));
             detailLabel.setText(TaskDialog.friendlyMessage(error));
-            detailLabel.setStyle("-fx-text-fill: #0F7C72;");
+            detailLabel.setStyle("-fx-text-fill: -brisk-accent-2;");
             cancel.setText(I18n.t("common.close"));
             cancel.setDisable(false);
             dialog.setHeight((double)280.0F);
@@ -154,6 +154,8 @@ public final class TaskDialog {
          case JAVA -> var10000 = I18n.t("install.stage.java");
          case FINISHING -> var10000 = I18n.t("install.stage.finishing");
          case DONE -> var10000 = I18n.t("install.stage.done");
+         case UPDATE_DOWNLOAD -> var10000 = I18n.t("update.stage.download");
+         case UPDATE_EXTRACT -> var10000 = I18n.t("update.stage.extract");
          default -> throw new MatchException((String)null, (Throwable)null);
       }
 

@@ -21,6 +21,7 @@ public record LauncherSettings(
         boolean insecureTls,
         String microsoftClientId,
         boolean autoUpdate,
+        boolean autoInstallUpdate,
         String updateChannel,
         String updateRepo) {
 
@@ -78,10 +79,13 @@ public record LauncherSettings(
                 "",
                 "",
                 false,
-                "Xiaojiu114514/Brisk-Launcher",
+                // 注意：这一位是 microsoftClientId。历史上这里被误填成更新仓库名，
+                // 导致第一次启动就带着一个「格式不正确的客户端 ID」，登录必失败。
+                "",
+                true,
                 true,
                 "github",
-                "");
+                DEFAULT_UPDATE_REPO);
     }
 
     public LauncherSettings {
@@ -111,30 +115,37 @@ public record LauncherSettings(
     public LauncherSettings withMicrosoftClientId(String clientId) {
         return new LauncherSettings(source, customMirror, concurrency, retries, timeoutSeconds,
                 language, autoLanguage, defaultMemoryMb, crashRuleRemoteUpdate, frpPath, proxy, insecureTls,
-                clientId, autoUpdate, updateChannel, updateRepo);
+                clientId, autoUpdate, autoInstallUpdate, updateChannel, updateRepo);
     }
     public LauncherSettings withInsecureTls(boolean insecure) {
         return new LauncherSettings(source, customMirror, concurrency, retries, timeoutSeconds,
                 language, autoLanguage, defaultMemoryMb, crashRuleRemoteUpdate, frpPath, proxy, insecure,
-                microsoftClientId, autoUpdate, updateChannel, updateRepo);
+                microsoftClientId, autoUpdate, autoInstallUpdate, updateChannel, updateRepo);
     }
 
     public LauncherSettings withCrashRuleRemoteUpdate(boolean enabled) {
         return new LauncherSettings(source, customMirror, concurrency, retries, timeoutSeconds,
                 language, autoLanguage, defaultMemoryMb, enabled, frpPath, proxy, insecureTls,
-                microsoftClientId, autoUpdate, updateChannel, updateRepo);
+                microsoftClientId, autoUpdate, autoInstallUpdate, updateChannel, updateRepo);
     }
 
     public LauncherSettings withAutoUpdate(boolean enabled) {
         return new LauncherSettings(source, customMirror, concurrency, retries, timeoutSeconds,
                 language, autoLanguage, defaultMemoryMb, crashRuleRemoteUpdate, frpPath, proxy, insecureTls,
-                microsoftClientId, enabled, updateChannel, updateRepo);
+                microsoftClientId, enabled, autoInstallUpdate, updateChannel, updateRepo);
+    }
+
+    /** 自动覆盖更新：检查到新版本就直接下载、覆盖并重新启动。 */
+    public LauncherSettings withAutoInstallUpdate(boolean enabled) {
+        return new LauncherSettings(source, customMirror, concurrency, retries, timeoutSeconds,
+                language, autoLanguage, defaultMemoryMb, crashRuleRemoteUpdate, frpPath, proxy, insecureTls,
+                microsoftClientId, autoUpdate, enabled, updateChannel, updateRepo);
     }
 
     public LauncherSettings withLanguage(String tag) {
         return new LauncherSettings(source, customMirror, concurrency, retries, timeoutSeconds,
                 tag, autoLanguage, defaultMemoryMb, crashRuleRemoteUpdate, frpPath, proxy, insecureTls,
-                microsoftClientId, autoUpdate, updateChannel, updateRepo);
+                microsoftClientId, autoUpdate, autoInstallUpdate, updateChannel, updateRepo);
     }
 
     /** 更新渠道是否可用（倉庫地址還沒填時不檢查更新）。 */

@@ -1,0 +1,55 @@
+/* 樱花 / Sakura — 浅色、柔和。只改设计变量。 */
+
+.root {
+    -brisk-bg: #FFF7F9;
+    -brisk-bg-soft: #FFEFF4;
+    -brisk-surface: #FFFFFF;
+    -brisk-surface-2: #FCE9EF;
+    -brisk-surface-3: #F9DDE6;
+    -brisk-surface-hover: #FDEBF1;
+    -brisk-surface-selected: #FBDDE8;
+    -brisk-glass: rgba(255, 247, 249, 0.66);
+    -brisk-glass-strong: rgba(255, 247, 249, 0.86);
+    -brisk-overlay: rgba(255, 250, 252, 0.97);
+    -brisk-overlay-solid: #FFF7F9;
+    -brisk-scrim: rgba(70, 30, 45, 0.55);
+
+    -brisk-border: #F5C8D6;
+    -brisk-border-soft: #F9DAE4;
+    -brisk-border-2: #EDB2C4;
+    -brisk-border-strong: #E8A0B6;
+
+    -brisk-text: #7A2C42;
+    -brisk-text-body: #8A3A50;
+    -brisk-text-dim: #9A5566;
+    -brisk-text-muted: #A5767F;
+    -brisk-text-faint: #C09AA5;
+    -brisk-text-tag: #8A3550;
+
+    -brisk-accent: #D94A75;
+    -brisk-accent-2: #C23A63;
+    -brisk-accent-strong: #E25C83;
+    -brisk-accent-soft: #F58BA9;
+    -brisk-accent-deep: #7A2C42;
+    -brisk-accent-border: #EE9FB6;
+    -brisk-on-accent: #FFFFFF;
+
+    -brisk-warn-text: #A9724A;
+    -brisk-warn-bg: #FFF0E2;
+    -brisk-warn-glass: rgba(255, 227, 196, 0.6);
+    -brisk-danger: #C0392B;
+    -brisk-ok: #2E8B62;
+    -brisk-warning: #C96A1B;
+
+    -brisk-shadow: rgba(217, 74, 117, 0.12);
+    -brisk-shadow-strong: rgba(217, 74, 117, 0.18);
+    -brisk-accent-shadow: rgba(217, 74, 117, 0.22);
+    -brisk-topbar-from: #FFEFF4;
+    -brisk-topbar-to: #FCE3EB;
+}
+
+/* 柔一点：卡片加一圈浅边框（颜色走 token），阴影沿用基础样式 */
+.card {
+    -fx-border-width: 1;
+    -fx-border-radius: 14;
+}

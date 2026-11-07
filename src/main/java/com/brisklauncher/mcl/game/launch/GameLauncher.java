@@ -77,7 +77,7 @@ public final class GameLauncher {
     private static final Pattern PLACEHOLDER = Pattern.compile("\\$\\{[^}]+}");
     private static final DateTimeFormatter LOG_TIME = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
     private static final String LAUNCHER_NAME = "BriskLauncher";
-    private static final String LAUNCHER_VERSION = "1.0.0";
+    private static final String LAUNCHER_VERSION = "1.1.0";
 
     private final Supplier<LauncherSettings> settingsSupplier;
     private final VersionInstaller installer;
@@ -269,6 +269,11 @@ public final class GameLauncher {
         ProcessBuilder builder = new ProcessBuilder(command)
                 .directory(gameDir.toFile())
                 .redirectErrorStream(true);
+        // 安全审计（appid 泄漏面）：子进程默认继承整个环境变量表，
+        // 任何整合包里不受信任的 mod 一行 System.getenv 就能拿到微软客户端 ID。
+        // 启动游戏前显式清掉（取 ID 请走 MsClientId，构建内置值不依赖环境变量）。
+        builder.environment().remove("BRISK_MS_CLIENT_ID");
+        builder.environment().remove("MCL_MS_CLIENT_ID");
         Path sessionLog = AppPaths.logsDir().resolve("session-" + entry.id() + "-"
                 + LocalDateTime.now().format(LOG_TIME) + ".log");
         Process process;

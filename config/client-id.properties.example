@@ -1,0 +1,11 @@
+# 微软应用（客户端）ID —— 样例文件（可入库，值必须留空）
+#
+# 用法：把本文件复制成同目录下的 client-id.properties，填入你的 appid。
+#       client-id.properties 已在 .gitignore 内，不会被提交。
+#
+# 注意：客户端 ID 是 public client 标识，不是密码。
+#       它会出现在 authorize URL 与 token 请求里，任何人都能抓到，
+#       所以「混淆」没有意义；防线在于只走 loopback 回呼 + Azure 侧收窄。
+#
+# 留空 = 此构建不含 appid（界面会提示「此构建不含客户端 ID」）。
+microsoft.client.id=

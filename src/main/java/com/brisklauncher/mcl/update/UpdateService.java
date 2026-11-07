@@ -31,7 +31,7 @@ import java.util.function.Consumer;
 public final class UpdateService {
 
     /** 目前版本（與 build.gradle / pom.xml 保持一致）。 */
-    public static final String CURRENT_VERSION = "1.0.0";
+    public static final String CURRENT_VERSION = "1.1.0";
 
     private static final Duration TIMEOUT = Duration.ofSeconds(20);
 
@@ -129,6 +129,47 @@ public final class UpdateService {
             SafeLog.warn("检查更新失败：" + message);
             return new CheckResult(false, null, message);
         }
+    }
+
+    /**
+     * 从 release 资产里挑出「可以自动覆盖更新」的桌面版 zip。
+     *
+     * <p>偏好顺序：Windows x64 → 名字带 Brisk → zip；排除 source / src 之类的原始码包。
+     * 没有可用 zip 时回传 {@code null}（呼叫方改走「开启下载页」）。
+     */
+    public static Asset pickDesktopPackage(Release release) {
+        if (release == null || release.assets() == null) {
+            return null;
+        }
+        Asset best = null;
+        int bestScore = Integer.MIN_VALUE;
+        for (Asset asset : release.assets()) {
+            String name = asset.name() == null ? "" : asset.name().toLowerCase(Locale.ROOT);
+            // 单 exe 发行：更新资产就是一个 .exe（优先），旧的 zip 仍然兼容
+            boolean exeAsset = name.endsWith(".exe");
+            if ((!exeAsset && !name.endsWith(".zip")) || name.contains("source") || name.contains("-src")) {
+                continue;
+            }
+            int score = 0;
+            if (exeAsset) {
+                // 单 exe 发行优先：exe 就是可直接替换的运行文件，不用再解压
+                score += 5;
+            }
+            if (name.contains("windows") || name.contains("win64") || name.contains("win-")) {
+                score += 3;
+            }
+            if (name.contains("brisk")) {
+                score += 2;
+            }
+            if (name.contains("x64") || name.contains("amd64")) {
+                score += 1;
+            }
+            if (score > bestScore) {
+                bestScore = score;
+                best = asset;
+            }
+        }
+        return best;
     }
 
     /** 下載某個資產到 {@code <data>/updates/}。 */

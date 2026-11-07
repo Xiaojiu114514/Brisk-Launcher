@@ -9,11 +9,17 @@ import com.brisklauncher.mcl.auth.api.GameSession;
 import com.brisklauncher.mcl.auth.api.LoginCredentials;
 import com.brisklauncher.mcl.auth.api.LoginResult;
 import com.brisklauncher.mcl.auth.api.StoredSession;
+import com.brisklauncher.mcl.i18n.I18n;
 import com.brisklauncher.mcl.net.Http;
+import com.brisklauncher.mcl.security.Redactor;
 import com.brisklauncher.mcl.security.SafeLog;
 import com.brisklauncher.mcl.ui.DesktopActions;
 import com.brisklauncher.mcl.util.MsClientId;
+import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URLDecoder;
@@ -23,507 +29,726 @@ import java.net.http.HttpResponse;
 import java.net.http.HttpRequest.BodyPublishers;
 import java.net.http.HttpResponse.BodyHandlers;
 import java.nio.charset.StandardCharsets;
+import java.security.SecureRandom;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
+/**
+ * 微软（Minecraft Java 版）正版登录。
+ *
+ * <h2>只有一条登录路径：系统浏览器 + loopback 回呼</h2>
+ * 设备码（「复制代码去网页输入」）已整条移除。原因：设备码流的本质是
+ * 「谁在网页上输入代码，令牌就发给索取代码的那台机器」——这正是设备码钓鱼的手法和
+ * 攻击面；appid 一旦泄漏，它就成了这条链的信誉背书。移除之后，授权码只会送到
+ * <b>使用者自己机器的 loopback 端口</b>，攻击者无法隔空收取（RFC 8252）。
+ *
+ * <h2>回呼通道的 12 条校驗</h2>
+ * 只绑 loopback、随机端口、PKCE(S256)、state 常数时间比对、一次性 latch、
+ * 远端位址必须是 loopback、Host 标头白名单（防 DNS rebinding）、只接受 GET /、
+ * 参数必须恰好一次、安全回应标头、单执行绪执行器、失败不把 code/state 写进日志与界面。
+ *
+ * <h2>关于 appid 的定位</h2>
+ * 客户端 ID 是 public client 标识，<b>不是机密</b>。本类不尝试隐藏它，
+ * 只保证它不出现在错误文本、日志与界面里（见 {@link Redactor}）。
+ */
 public final class MicrosoftAuthProvider implements AuthProvider {
-   private static final String SCOPE = "XboxLive.signin offline_access";
-   private static final String DEVICE_CODE_URL = "https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode";
-   private static final String TOKEN_URL = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token";
-   private static final String XBL_URL = "https://user.auth.xboxlive.com/user/authenticate";
-   private static final String XSTS_URL = "https://xsts.auth.xboxlive.com/xsts/authorize";
-   private static final String MC_LOGIN_URL = "https://api.minecraftservices.com/authentication/login_with_xbox";
-   private static final String MC_PROFILE_URL = "https://api.minecraftservices.com/minecraft/profile";
-   private static final String USER_AGENT = "BriskLauncher/1.0.0";
-   private static final Duration TIMEOUT = Duration.ofSeconds(30L);
-   private final ObjectMapper mapper;
-   private final String clientId;
 
-   public MicrosoftAuthProvider() {
-      this("");
-   }
+    /** 不再申请 offline_access：本启动器不保存 refresh token，多要权限只会扩大泄漏面。 */
+    private static final String SCOPE = "XboxLive.signin";
+    private static final String AUTHORIZE_URL = "https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize";
+    private static final String TOKEN_URL = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token";
+    private static final String XBL_URL = "https://user.auth.xboxlive.com/user/authenticate";
+    private static final String XSTS_URL = "https://xsts.auth.xboxlive.com/xsts/authorize";
+    private static final String MC_LOGIN_URL = "https://api.minecraftservices.com/authentication/login_with_xbox";
+    private static final String MC_PROFILE_URL = "https://api.minecraftservices.com/minecraft/profile";
+    private static final String USER_AGENT = "BriskLauncher/1.1.0";
+    private static final Duration TIMEOUT = Duration.ofSeconds(30L);
 
-   public MicrosoftAuthProvider(String clientId) {
-      this.mapper = new ObjectMapper();
-      String trimmed = clientId == null ? "" : clientId.trim();
-      this.clientId = trimmed;
-   }
+    /** 等使用者完成网页登录的上限（秒）。 */
+    private static final int CALLBACK_TIMEOUT_SECONDS = 240;
 
-   public AccountType type() {
-      return AccountType.MICROSOFT;
-   }
+    private static final String CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:";
 
-   public LoginResult login(LoginCredentials credentials) {
-      return LoginResult.fail("正版登录必须使用设备码流程");
-   }
+    private final ObjectMapper mapper;
+    private final String clientId;
 
-   public void loginWithDeviceCode(Consumer<DeviceCodeFlow> onDeviceCode, Consumer<String> onStateChange, Consumer<LoginResult> onComplete) {
-      Thread.ofVirtual().name("mcl-microsoft-login").start(() -> {
-         try {
-            onStateChange.accept("正在申请设备码…");
-            String effectiveId = this.effectiveClientId();
-            String problem = describeClientIdProblem(effectiveId);
-            if (problem != null) {
-               onComplete.accept(LoginResult.fail(problem));
-               return;
-            }
+    public MicrosoftAuthProvider() {
+        this("");
+    }
 
-            String var10000 = encode(effectiveId);
-            String body = "client_id=" + var10000 + "&scope=" + encode("XboxLive.signin offline_access");
-            JsonNode codeNode = this.postForm("https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode", body);
-            if (codeNode.hasNonNull("error")) {
-               throw new AuthException("微软拒绝了设备码申请：" + describeOAuthError(codeNode));
-            }
+    public MicrosoftAuthProvider(String clientId) {
+        this.mapper = new ObjectMapper();
+        String trimmed = clientId == null ? "" : clientId.trim();
+        this.clientId = trimmed;
+    }
 
-            String userCode = codeNode.path("user_code").asText("");
-            String deviceCode = codeNode.path("device_code").asText("");
-            String verification = codeNode.path("verification_uri").asText("");
-            if (userCode.isEmpty() || deviceCode.isEmpty() || verification.isEmpty()) {
-               throw new AuthException("微软返回的设备码不完整，请稍后重试");
-            }
+    public AccountType type() {
+        return AccountType.MICROSOFT;
+    }
 
-            DeviceCodeFlow flow = new DeviceCodeFlow(userCode, URI.create(verification), deviceCode, codeNode.path("interval").asInt(5), codeNode.path("expires_in").asInt(900));
-            onDeviceCode.accept(flow);
-            onStateChange.accept("等待网页授权…（复制代码后打开登录页）");
-            long deadline = System.currentTimeMillis() + (long)flow.expiresIn() * 1000L;
-            int interval = Math.max(flow.interval(), 3);
-            String msAccessToken = null;
+    /** 正版登录只走浏览器回呼；这里保留位只是为了满足 {@link AuthProvider} 接口。 */
+    public LoginResult login(LoginCredentials credentials) {
+        return LoginResult.fail(I18n.t("account.ms.browser_only"));
+    }
 
-            while(System.currentTimeMillis() < deadline) {
-               Thread.sleep((long)interval * 1000L);
-               var10000 = encode(this.effectiveClientId());
-               String pollBody = "grant_type=urn:ietf:params:oauth:grant-type:device_code&client_id=" + var10000 + "&device_code=" + encode(flow.deviceCode());
-               JsonNode pollNode = this.postForm("https://login.microsoftonline.com/consumers/oauth2/v2.0/token", pollBody);
-               String error = pollNode.path("error").asText("");
-               if (error.isEmpty()) {
-                  msAccessToken = pollNode.path("access_token").asText("");
-                  if (!msAccessToken.isEmpty()) {
-                     break;
-                  }
-               } else if (!"authorization_pending".equals(error)) {
-                  if (!"slow_down".equals(error)) {
-                     if ("expired_token".equals(error)) {
-                        throw new AuthException("设备码已过期，请重新点击登录");
-                     }
+    // ================================================================
+    //  登录主流程
+    // ================================================================
 
-                     if ("authorization_declined".equals(error)) {
-                        throw new AuthException("你拒绝了本次授权");
-                     }
+    public void loginWithBrowser(Consumer<String> onStateChange, Consumer<LoginResult> onComplete) {
+        loginWithBrowser(onStateChange, url -> {
+        }, onComplete);
+    }
 
-                     throw new AuthException("网页授权失败：" + describeOAuthError(pollNode));
-                  }
-
-                  interval += 3;
-               }
-            }
-
-            if (msAccessToken == null || msAccessToken.isEmpty()) {
-               throw new AuthException("等待授权超时，请重新登录并在网页上完成授权");
-            }
-
-            onStateChange.accept("正在登录 Xbox Live…");
-            Map<String, Object> xblPayload = Map.of("Properties", Map.of("AuthMethod", "RPS", "SiteName", "user.auth.xboxlive.com", "RpsTicket", "d=" + msAccessToken), "RelyingParty", "http://auth.xboxlive.com", "TokenType", "JWT");
-            JsonNode xblNode = this.postJson("https://user.auth.xboxlive.com/user/authenticate", xblPayload);
-            String xblToken = xblNode.path("Token").asText("");
-            String uhs = firstXuiUhs(xblNode);
-            if (xblToken.isEmpty() || uhs.isEmpty()) {
-               throw new AuthException("Xbox Live 登录失败：" + responseHint(xblNode));
-            }
-
-            onStateChange.accept("正在获取 XSTS 令牌…");
-            Map<String, Object> xstsPayload = Map.of("Properties", Map.of("SandboxId", "RETAIL", "UserTokens", List.of(xblToken)), "RelyingParty", "rp://api.minecraftservices.com/", "TokenType", "JWT");
-            JsonNode xstsNode = this.postJson("https://xsts.auth.xboxlive.com/xsts/authorize", xstsPayload);
-            if (xstsNode.has("XErr")) {
-               throw new AuthException(xstsErrorMessage(xstsNode.path("XErr").asLong()));
-            }
-
-            String xstsToken = xstsNode.path("Token").asText("");
-            String xstsUhs = firstXuiUhs(xstsNode);
-            if (xstsToken.isEmpty() || xstsUhs.isEmpty()) {
-               throw new AuthException("XSTS 授权失败：" + responseHint(xstsNode));
-            }
-
-            onStateChange.accept("正在登录 Minecraft…");
-            Map<String, Object> mcPayload = Map.of("identityToken", "XBL3.0 x=" + xstsUhs + ";" + xstsToken);
-
-            JsonNode mcNode;
+    /**
+     * 同 {@link #loginWithBrowser(Consumer, Consumer)}，但额外把授权 URL 交给调用方。
+     *
+     * <p>为什么需要：自动打开浏览器可能失败（默认浏览器被卸载 / 被组策略挡住 / 开在别的配置里），
+     * 或者使用者把登录页关掉了。这时界面上要有一个「手动打开登录页」的按钮 —— 它需要这个 URL。
+     *
+     * <p>URL 只在内存里传给界面，<b>不显示、不写日志</b>（含 client_id 与一次性 state，
+     * 显示出来等于把一个公开识别码 + 本次流程的 state 摆进截图；真要给使用者只能进剪贴板）。
+     */
+    public void loginWithBrowser(Consumer<String> onStateChange,
+                                 Consumer<String> onAuthorizeUrl,
+                                 Consumer<LoginResult> onComplete) {
+        Thread.ofVirtual().name("mcl-ms-browser").start(() -> {
             try {
-               mcNode = this.postJson("https://api.minecraftservices.com/authentication/login_with_xbox", mcPayload);
-            } catch (AuthException mcError) {
-               logXstsClaims(xstsToken);
-               String var10002 = mcError.getMessage();
-               throw new AuthException(var10002 + "\n\n" + xstsClaimsSummary(xstsToken) + "\nuhs 长度=" + xstsUhs.length());
+                onStateChange.accept(I18n.t("account.ms.state.opening"));
+                String cid = effectiveClientId();
+                String problem = describeClientIdProblem(cid);
+                if (problem != null) {
+                    onComplete.accept(LoginResult.fail(problem));
+                    return;
+                }
+
+                String msAccessToken;
+                try (LoopbackCallback callback = LoopbackCallback.start()) {
+                    String authorizeUrl = AUTHORIZE_URL
+                            + "?client_id=" + encode(cid)
+                            + "&response_type=code"
+                            + "&redirect_uri=" + encode(callback.redirectUri())
+                            + "&scope=" + encode(SCOPE)
+                            + "&prompt=select_account"
+                            + "&code_challenge=" + encode(callback.challenge())
+                            + "&code_challenge_method=S256"
+                            + "&state=" + encode(callback.state());
+
+                    onStateChange.accept(I18n.t("account.ms.state.waiting"));
+                    onAuthorizeUrl.accept(authorizeUrl);
+                    // 打不开浏览器不再直接失败：界面上的「手动打开登录页」还能救回来，
+                    // 回呼服务器继续等（240 秒内完成授权都算成功）。
+                    // mcl.dev.msnobrowser 只给截图/回归用：跳过真的开浏览器（用 != null，与其它 dev 开关一致）。
+                    if (System.getProperty("mcl.dev.msnobrowser") != null
+                            || !DesktopActions.openUrl(authorizeUrl)) {
+                        onStateChange.accept(I18n.t("account.ms.open_failed"));
+                    }
+
+                    String code;
+                    try {
+                        code = callback.code().get(CALLBACK_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                    } catch (TimeoutException timeout) {
+                        throw new AuthException(I18n.t("account.ms.callback_timeout"));
+                    }
+
+                    onStateChange.accept(I18n.t("account.ms.state.exchanging"));
+                    String tokenBody = "grant_type=authorization_code"
+                            + "&code=" + encode(code)
+                            + "&redirect_uri=" + encode(callback.redirectUri())
+                            + "&client_id=" + encode(cid)
+                            + "&scope=" + encode(SCOPE)
+                            + "&code_verifier=" + encode(callback.verifier());
+                    JsonNode tokenNode = postForm(TOKEN_URL, tokenBody);
+                    msAccessToken = tokenNode.path("access_token").asText("");
+                    if (msAccessToken.isEmpty()) {
+                        throw new AuthException(I18n.t("account.ms.token_failed",
+                                describeOAuthError(tokenNode)));
+                    }
+                }
+
+                finishXboxLogin(msAccessToken, onStateChange, onComplete);
+            } catch (AuthException e) {
+                onComplete.accept(LoginResult.fail(e.getMessage()));
+            } catch (Exception e) {
+                onComplete.accept(LoginResult.fail(safeError(e)));
             }
+        });
+    }
 
-            String mcAccessToken = mcNode.path("access_token").asText("");
-            if (mcAccessToken.isEmpty()) {
-               throw new AuthException("Minecraft 登录失败（该账号可能没有购买 Java 版）：" + responseHint(mcNode));
+    private String effectiveClientId() {
+        return MsClientId.resolve(this.clientId);
+    }
+
+    private static String describeClientIdProblem(String id) {
+        if (id == null || id.isBlank()) {
+            return I18n.t("account.ms.client_id_missing");
+        }
+        boolean guid = id.matches("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
+        boolean xboxLegacy = id.matches("000000004[0-9A-Fa-f]{7}");
+        return guid || xboxLegacy ? null : I18n.t("account.ms.client_id_bad_format");
+    }
+
+    // ================================================================
+    //  loopback 回呼（专属于本进程的一次性通道）
+    // ================================================================
+
+    /**
+     * 一次性回调通道。
+     *
+     * <p>同时绑 {@code 127.0.0.1} 与 {@code ::1}（能绑就绑）：URL 里写的是
+     * {@code http://localhost:port}，浏览器解析成 IPv4 / IPv6 都能连上。
+     * 之前「绑 127.0.0.1、URL 写 localhost」在 IPv6 优先的机器上会直接连不上。
+     */
+    private static final class LoopbackCallback implements AutoCloseable {
+
+        private static final SecureRandom RANDOM = new SecureRandom();
+        private static final int PORT_MIN = 49152;
+        private static final int PORT_RANGE = 16384;
+
+        private final String verifier = Pkce.verifier();
+        private final String challenge = Pkce.challenge(verifier);
+        private final String state = Pkce.state();
+        private final CompletableFuture<String> code = new CompletableFuture<>();
+        private final AtomicBoolean consumed = new AtomicBoolean(false);
+        private final List<HttpServer> servers = new ArrayList<>();
+        private final List<ExecutorService> executors = new ArrayList<>();
+        private final String redirectUri;
+        private final Set<String> allowedHosts;
+
+        private LoopbackCallback(int port) {
+            this.redirectUri = "http://localhost:" + port;
+            this.allowedHosts = Set.of(
+                    "localhost:" + port,
+                    "127.0.0.1:" + port,
+                    "[::1]:" + port);
+        }
+
+        static LoopbackCallback start() throws IOException {
+            IOException last = null;
+            for (int attempt = 0; attempt < 10; attempt++) {
+                int port = PORT_MIN + RANDOM.nextInt(PORT_RANGE);
+                HttpServer ipv4;
+                try {
+                    ipv4 = HttpServer.create(
+                            new InetSocketAddress(InetAddress.getByName("127.0.0.1"), port), 0);
+                } catch (IOException busy) {
+                    last = busy;
+                    continue;
+                }
+                LoopbackCallback callback = new LoopbackCallback(ipv4.getAddress().getPort());
+                callback.install(ipv4);
+                HttpServer ipv6 = null;
+                try {
+                    ipv6 = HttpServer.create(
+                            new InetSocketAddress(InetAddress.getByName("::1"), port), 0);
+                    callback.install(ipv6);
+                } catch (Exception ignored) {
+                    // 没有 IPv6 / 被占用：只跑 IPv4。浏览器连 localhost 失败会自动回退。
+                    ipv6 = null;
+                }
+                callback.servers.forEach(HttpServer::start);
+                return callback;
             }
+            throw last != null ? last : new IOException("no free loopback port");
+        }
 
-            long expiresIn = mcNode.path("expires_in").asLong(86400L);
-            onStateChange.accept("正在获取账户信息…");
-            HttpRequest profileReq = HttpRequest.newBuilder(URI.create("https://api.minecraftservices.com/minecraft/profile")).header("Authorization", "Bearer " + mcAccessToken).header("User-Agent", "BriskLauncher/1.0.0").timeout(TIMEOUT).GET().build();
-            HttpResponse<String> profileResp = Http.authClient().send(profileReq, BodyHandlers.ofString(StandardCharsets.UTF_8));
-            if (profileResp.statusCode() != 200) {
-               throw new AuthException("获取 Minecraft 档案失败（HTTP " + profileResp.statusCode() + "），请确认该账号已购买 Java 版并创建过角色");
+        private void install(HttpServer server) {
+            ExecutorService executor = Executors.newSingleThreadExecutor(r -> {
+                Thread thread = new Thread(r, "mcl-oauth-callback");
+                thread.setDaemon(true);
+                return thread;
+            });
+            server.setExecutor(executor);
+            server.createContext("/", this::handle);
+            servers.add(server);
+            executors.add(executor);
+        }
+
+        String verifier() {
+            return verifier;
+        }
+
+        String challenge() {
+            return challenge;
+        }
+
+        String state() {
+            return state;
+        }
+
+        String redirectUri() {
+            return redirectUri;
+        }
+
+        CompletableFuture<String> code() {
+            return code;
+        }
+
+        private void handle(HttpExchange exchange) {
+            try {
+                // ① Host 白名单：防 DNS rebinding（攻击者把 evil.com 指到 127.0.0.1）
+                String host = exchange.getRequestHeaders().getFirst("Host");
+                if (host == null || !allowedHosts.contains(host.toLowerCase(Locale.ROOT))) {
+                    SafeLog.warn("OAuth 回呼被拒（Host 不在白名单）");
+                    reply(exchange, 421, "text/plain; charset=utf-8", bytes("Bad Host"));
+                    return;
+                }
+                // ② 远端必须是 loopback（将来绑错也不会变成对外服务）
+                if (exchange.getRemoteAddress() == null
+                        || !exchange.getRemoteAddress().getAddress().isLoopbackAddress()) {
+                    SafeLog.warn("OAuth 回呼被拒（远端不是 loopback）");
+                    reply(exchange, 403, "text/plain; charset=utf-8", bytes("Forbidden"));
+                    return;
+                }
+                // ③ 只接受 GET /（浏览器预取、OPTIONS 之类不参与流程）
+                if (!"/".equals(exchange.getRequestURI().getPath())
+                        || !"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+                    reply(exchange, 404, "text/plain; charset=utf-8", new byte[0]);
+                    return;
+                }
+                // ④ 一次性：已经出过终态就 410
+                if (consumed.get()) {
+                    reply(exchange, 410, "text/plain; charset=utf-8", bytes("Gone"));
+                    return;
+                }
+
+                Map<String, List<String>> params = parseQuery(exchange.getRequestURI().getRawQuery());
+                List<String> codes = params.getOrDefault("code", List.of());
+                List<String> errors = params.getOrDefault("error", List.of());
+                List<String> states = params.getOrDefault("state", List.of());
+
+                // ⑤ 参数必须恰好一次（重复 code 是典型的参数污染）
+                if (codes.size() + errors.size() != 1 || states.size() != 1) {
+                    replyPage(exchange, "fail", 400);
+                    return;
+                }
+                // ⑥ state 常数时间比对；缺失或不符一律拒绝
+                if (!Pkce.stateMatches(state, states.get(0))) {
+                    SafeLog.warn("OAuth 回呼被拒（state 不匹配）");
+                    replyPage(exchange, "fail", 400);
+                    if (consumed.compareAndSet(false, true)) {
+                        code.completeExceptionally(
+                                new AuthException(I18n.t("account.ms.callback_bad_state")));
+                        stopLater();
+                    }
+                    return;
+                }
+                // ⑦ 抢 latch：并发/重放的第二个请求拿不到终态
+                if (!consumed.compareAndSet(false, true)) {
+                    reply(exchange, 410, "text/plain; charset=utf-8", bytes("Gone"));
+                    return;
+                }
+
+                if (!codes.isEmpty()) {
+                    SafeLog.info("OAuth 回呼完成（Host/远端/state 校验通过）");
+                    replyPage(exchange, "ok", 200);
+                    code.complete(codes.get(0));
+                } else {
+                    String error = errors.get(0);
+                    boolean denied = "access_denied".equalsIgnoreCase(error);
+                    SafeLog.info("OAuth 回呼结束（error=" + (denied ? "access_denied" : "other") + "）");
+                    replyPage(exchange, denied ? "cancel" : "fail", 200);
+                    code.completeExceptionally(new AuthException(denied
+                            ? I18n.t("account.ms.callback_cancelled")
+                            : I18n.t("account.ms.callback_bad_request")));
+                }
+                stopLater();
+            } catch (Exception error) {
+                try {
+                    reply(exchange, 500, "text/plain; charset=utf-8", bytes("Error"));
+                } catch (Exception ignored) {
+                    // 连回应都写不出去就放弃
+                }
             }
+        }
 
-            JsonNode profileNode = this.mapper.readTree((String)profileResp.body());
-            String uuid = profileNode.path("id").asText("");
-            String name = profileNode.path("name").asText("");
-            if (uuid.isEmpty() || name.isEmpty()) {
-               throw new AuthException("Minecraft 档案缺少角色信息，请先在官方启动器创建角色");
+        /** 从别的线程关闭，避免在自己的 handler 里 stop 造成等待。 */
+        private void stopLater() {
+            Thread.ofVirtual().name("mcl-oauth-stop").start(this::close);
+        }
+
+        private static void replyPage(HttpExchange exchange, String kind, int status) {
+            reply(exchange, status, "text/html; charset=utf-8", resultPage(kind));
+        }
+
+        private static void reply(HttpExchange exchange, int status, String contentType, byte[] body) {
+            try {
+                var headers = exchange.getResponseHeaders();
+                headers.set("Content-Type", contentType);
+                headers.set("Cache-Control", "no-store");
+                headers.set("Referrer-Policy", "no-referrer");
+                headers.set("X-Content-Type-Options", "nosniff");
+                headers.set("Content-Security-Policy", CSP);
+                if (body.length == 0) {
+                    exchange.sendResponseHeaders(status, -1);
+                } else {
+                    exchange.sendResponseHeaders(status, body.length);
+                    try (var out = exchange.getResponseBody()) {
+                        out.write(body);
+                    }
+                }
+            } catch (IOException ignored) {
+                // 浏览器提前关页面是常态
+            } finally {
+                exchange.close();
             }
+        }
 
-            StoredSession session = new StoredSession(AccountType.MICROSOFT, uuid, name, (char[])null, mcAccessToken.toCharArray(), System.currentTimeMillis() + expiresIn * 1000L, (String)null);
-            SafeLog.loginSuccess(AccountType.MICROSOFT);
-            onComplete.accept(LoginResult.ok(session));
-         } catch (AuthException e) {
-            onComplete.accept(LoginResult.fail(e.getMessage()));
-         } catch (Exception e) {
-            onComplete.accept(LoginResult.fail(safeError(e)));
-         }
-
-      });
-   }
-
-   private String effectiveClientId() {
-      return MsClientId.resolve(this.clientId);
-   }
-
-   private static String describeClientIdProblem(String id) {
-      if (id != null && !id.isBlank()) {
-         return !id.matches("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}") && !id.matches("000000004[0-9A-Fa-f]{7}") ? "客户端 ID 格式不正确（应为 8-4-4-4-12 的 GUID）。请确认复制的是「应用程序(客户端) ID」，而不是「对象 ID」或「租户 ID」。" : null;
-      } else {
-         // 用户可见的文字走 I18n（简中写死会在繁中界面漏出简体）
-         return com.brisklauncher.mcl.i18n.I18n.t("account.ms.client_id_missing");
-      }
-   }
-
-   private JsonNode postForm(String url, String body) throws Exception {
-      HttpRequest request = HttpRequest.newBuilder(URI.create(url)).header("Content-Type", "application/x-www-form-urlencoded").header("Accept", "application/json").header("User-Agent", "BriskLauncher/1.0.0").timeout(TIMEOUT).POST(BodyPublishers.ofString(body)).build();
-      HttpResponse<String> response = Http.authClient().send(request, BodyHandlers.ofString(StandardCharsets.UTF_8));
-      return this.mapper.readTree((String)response.body());
-   }
-
-   /**
-    * 展示给用户的 XSTS 摘要。
-    *
-    * <p>安全审计 L-05：以前会把 appid / xtid 的值拼进错误文本，用户截图求助就泄露账号标识。
-    * 现在只给「有没有」这种布尔信息（与 logXstsClaims 口径一致）。
-    */
-   private static String xstsClaimsSummary(String jwt) {
-      try {
-         String[] parts = jwt.split("\\.");
-         if (parts.length < 2) {
-            return "XSTS 声明：无法解析";
-         }
-         JsonNode claims = Http.mapper().readTree(Base64.getUrlDecoder().decode(parts[1]));
-         return "XSTS 声明：rp=" + (claims.has("rp") ? "有" : "无")
-                 + "，xui=" + (claims.has("xui") ? "有" : "无")
-                 + "，xtid=" + (claims.has("xtid") ? "有" : "无");
-      } catch (Exception var3) {
-         return "XSTS 声明：解析失败";
-      }
-   }
-
-   private static void logXstsClaims(String jwt) {
-      try {
-         String[] parts = jwt.split("\\.");
-         if (parts.length < 2) {
-            return;
-         }
-
-         byte[] payload = Base64.getUrlDecoder().decode(parts[1]);
-         JsonNode claims = Http.mapper().readTree(payload);
-         String var10000 = claims.path("appid").asText("(无)");
-         // 安全：只记录「有没有 rp/xui/xtid」这种布林讯息，不打印 appid/xtid 的值
-          SafeLog.info("XSTS 声明校验通过（rp=" + (claims.has("rp") ? "有" : "无")
-                  + ", xui=" + (claims.has("xui") ? "有" : "无")
-                  + ", xtid=" + (claims.has("xtid") ? "有" : "无") + "）");
-      } catch (Exception var4) {
-      }
-
-   }
-
-   public void loginWithBrowser(Consumer<String> onStateChange, Consumer<LoginResult> onComplete) {
-      Thread.ofVirtual().name("mcl-ms-browser").start(() -> {
-         HttpServer server = null;
-
-         try {
-            String problem = describeClientIdProblem(this.effectiveClientId());
-            if (problem == null) {
-               // PKCE（公开客户端必备）：verifier 只留在本机，challenge 才给浏览器；
-               // 宣告在回呼 handler 之前，lambda 才能比对 state。
-               String codeVerifier = Pkce.verifier();
-               String codeChallenge = Pkce.challenge(codeVerifier);
-               String state = Pkce.state();
-               server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-               int port = server.getAddress().getPort();
-               String redirect = "http://localhost:" + port;
-               CompletableFuture<String> codeFuture = new CompletableFuture();
-               server.createContext("/", (exchange) -> {
-                  String query = exchange.getRequestURI().getQuery();
-                  String code = null;
-                  String error = null;
-                  String callbackState = null;
-                  if (query != null) {
-                     for(String pair : query.split("&")) {
-                        String[] kv = pair.split("=", 2);
-                        if (kv.length == 2 && "code".equals(kv[0])) {
-                           code = URLDecoder.decode(kv[1], StandardCharsets.UTF_8);
-                        } else if (kv.length == 2 && "error".equals(kv[0])) {
-                           error = kv[1];
-                        } else if (kv.length == 2 && "state".equals(kv[0])) {
-                           callbackState = URLDecoder.decode(kv[1], StandardCharsets.UTF_8);
-                        }
-                     }
-                  }
-                  // CSRF 防护（安全审计 M1）：state 必须存在且一致，缺了也要拒绝；
-                  // 而且只处理根路径的 GET，避免本机其他程序/浏览器预取把流程打断。
-                  if (!"/".equals(exchange.getRequestURI().getPath())
-                          || !"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
-                     exchange.sendResponseHeaders(404, -1);
-                     exchange.close();
-                     return;
-                  }
-                  if (callbackState == null || !Pkce.stateMatches(state, callbackState)) {
-                     byte[] deny = ("<html><head><meta charset='utf-8'></head><body style='font-family:sans-serif;"
-                             + "padding:40px'><h2>授权被拒绝</h2><p>state 校验失败，请回到启动器重试。</p></body></html>")
-                             .getBytes(StandardCharsets.UTF_8);
-                     exchange.getResponseHeaders().add("Content-Type", "text/html; charset=utf-8");
-                     exchange.sendResponseHeaders(400, (long) deny.length);
-                     exchange.getResponseBody().write(deny);
-                     exchange.close();
-                     codeFuture.completeExceptionally(new AuthException("登录回调的 state 缺失或不匹配，已拒绝本次授权"));
-                     return;
-                  }
-                  // L13：只有明确带 code 或 error 的请求才算结束（浏览器预取不再打断登录）
-                  if (code == null && error == null) {
-                     exchange.sendResponseHeaders(400, -1);
-                     exchange.close();
-                     return;
-                  }
-
-                  byte[] body = "<html><head><meta charset='utf-8'><title>Brisk Launcher</title></head><body style='font-family:sans-serif;padding:40px'><h2>登录完成</h2><p>可以关闭此页面，回到启动器。</p></body></html>".getBytes(StandardCharsets.UTF_8);
-                  exchange.getResponseHeaders().add("Content-Type", "text/html; charset=utf-8");
-                  exchange.sendResponseHeaders(200, (long)body.length);
-                  exchange.getResponseBody().write(body);
-                  exchange.close();
-                  if (code != null) {
-                     codeFuture.complete(code);
-                  } else {
-                     codeFuture.completeExceptionally(new AuthException("授权被取消或失败：" + error));
-                  }
-
-               });
-               server.start();
-               String cid = this.effectiveClientId();
-               String var10000 = encode(cid);
-               String scope = "XboxLive.signin offline_access";
-               String authorizeUrl = "https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize?client_id="
-                  + encode(cid) + "&response_type=code&redirect_uri=" + encode(redirect)
-                  + "&scope=" + encode(scope) + "&prompt=select_account"
-                  + "&code_challenge=" + encode(codeChallenge) + "&code_challenge_method=S256"
-                  + "&state=" + encode(state);
-               onStateChange.accept("已在浏览器打开登录页，请完成微软登录…");
-               if (!DesktopActions.openUrl(authorizeUrl)) {
-                  onComplete.accept(LoginResult.fail("无法打开系统浏览器。请手动访问：\n" + authorizeUrl));
-                  return;
-               }
-
-               String code = (String)codeFuture.get(240L, TimeUnit.SECONDS);
-               server.stop(0);
-               server = null;
-               onStateChange.accept("正在换取令牌…");
-               var10000 = encode(code);
-               String tokenBody = "grant_type=authorization_code&code=" + var10000 + "&redirect_uri=" + encode(redirect) + "&client_id=" + encode(cid) + "&scope=" + encode(scope) + "&code_verifier=" + encode(codeVerifier);
-               JsonNode tokenNode = this.postForm("https://login.microsoftonline.com/consumers/oauth2/v2.0/token", tokenBody);
-               String msToken = tokenNode.path("access_token").asText("");
-               if (msToken.isEmpty()) {
-                  throw new AuthException("换取微软令牌失败：" + describeOAuthError(tokenNode));
-               }
-
-               this.finishXboxLogin(msToken, onStateChange, onComplete);
-               return;
+        private static Map<String, List<String>> parseQuery(String rawQuery) {
+            Map<String, List<String>> result = new LinkedHashMap<>();
+            if (rawQuery == null || rawQuery.isEmpty()) {
+                return result;
             }
-
-            onComplete.accept(LoginResult.fail(problem));
-         } catch (AuthException e) {
-            onComplete.accept(LoginResult.fail(e.getMessage()));
-            return;
-         } catch (Exception e) {
-            String var10001 = e.getClass().getSimpleName();
-            onComplete.accept(LoginResult.fail("浏览器登录失败：" + var10001 + (e.getMessage() == null ? "" : " - " + e.getMessage())));
-            return;
-         } finally {
-            if (server != null) {
-               server.stop(0);
+            for (String pair : rawQuery.split("&")) {
+                if (pair.isEmpty()) {
+                    continue;
+                }
+                int eq = pair.indexOf('=');
+                String key = eq < 0 ? pair : pair.substring(0, eq);
+                String value = eq < 0 ? "" : pair.substring(eq + 1);
+                try {
+                    key = URLDecoder.decode(key, StandardCharsets.UTF_8);
+                    value = URLDecoder.decode(value, StandardCharsets.UTF_8);
+                } catch (IllegalArgumentException badEncoding) {
+                    continue;
+                }
+                result.computeIfAbsent(key, k -> new ArrayList<>()).add(value);
             }
+            return result;
+        }
 
-         }
+        @Override
+        public void close() {
+            for (HttpServer server : servers) {
+                try {
+                    server.stop(0);
+                } catch (Exception ignored) {
+                    // 尽力而为
+                }
+            }
+            for (ExecutorService executor : executors) {
+                executor.shutdownNow();
+            }
+            servers.clear();
+            executors.clear();
+        }
+    }
 
-      });
-   }
+    // ================================================================
+    //  定制结果页（成功 / 失败 / 取消）
+    // ================================================================
 
-   private void finishXboxLogin(String msAccessToken, Consumer<String> onStateChange, Consumer<LoginResult> onComplete) throws Exception {
-      onStateChange.accept("正在登录 Xbox Live…");
-      Map<String, Object> xblPayload = Map.of("Properties", Map.of("AuthMethod", "RPS", "SiteName", "user.auth.xboxlive.com", "RpsTicket", "d=" + msAccessToken), "RelyingParty", "http://auth.xboxlive.com", "TokenType", "JWT");
-      JsonNode xblNode = this.postJson("https://user.auth.xboxlive.com/user/authenticate", xblPayload);
-      String xblToken = xblNode.path("Token").asText("");
-      String uhs = firstXuiUhs(xblNode);
-      if (!xblToken.isEmpty() && !uhs.isEmpty()) {
-         onStateChange.accept("正在获取 XSTS 令牌…");
-         Map<String, Object> xstsPayload = Map.of("Properties", Map.of("SandboxId", "RETAIL", "UserTokens", List.of(xblToken)), "RelyingParty", "rp://api.minecraftservices.com/", "TokenType", "JWT");
-         JsonNode xstsNode = this.postJson("https://xsts.auth.xboxlive.com/xsts/authorize", xstsPayload);
-         if (xstsNode.has("XErr")) {
+    private static final String RESULT_TEMPLATE = "/assets/auth/result.html";
+    private static volatile String cachedTemplate;
+
+    /**
+     * 生成结果页。模板里的占位符只用 {@code %%X%%}（不用 {@code {}}），
+     * 因为要嵌 CSS；替换值只来自本项目的语言包，不来自 query 参数。
+     */
+    private static byte[] resultPage(String kind) {
+        String accent = switch (kind) {
+            case "ok" -> "#3fb950";
+            case "cancel" -> "#d29922";
+            default -> "#f85149";
+        };
+        String icon = switch (kind) {
+            case "ok" -> "<path d=\"M4 12.5 9.5 18 20 6.5\"/>";
+            case "cancel" -> "<path d=\"M5 12h14\"/>";
+            default -> "<path d=\"M6 6l12 12M18 6L6 18\"/>";
+        };
+        String title = escapeHtml(I18n.t("auth.page." + kind + ".title"));
+        String body = escapeHtml(I18n.t("auth.page." + kind + ".body"));
+        String hint = escapeHtml(I18n.t("auth.page.hint"));
+        String brand = escapeHtml(I18n.t("auth.page.brand"));
+
+        String template = cachedTemplate;
+        if (template == null) {
+            template = loadTemplate();
+            cachedTemplate = template;
+        }
+        if (template == null) {
+            // 资源丢了也要能完成登录（fail-safe）
+            return bytes("<!doctype html><meta charset='utf-8'><title>" + brand + "</title>"
+                    + "<h2>" + title + "</h2><p>" + body + "</p><p>" + hint + "</p>");
+        }
+        return template
+                .replace("%%BRAND%%", brand)
+                .replace("%%TITLE%%", title)
+                .replace("%%BODY%%", body)
+                .replace("%%HINT%%", hint)
+                .replace("%%ACCENT%%", accent)
+                .replace("%%ICON%%", icon)
+                .getBytes(StandardCharsets.UTF_8);
+    }
+
+    private static String loadTemplate() {
+        try (InputStream in = MicrosoftAuthProvider.class.getResourceAsStream(RESULT_TEMPLATE)) {
+            if (in == null) {
+                return null;
+            }
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (Exception error) {
+            return null;
+        }
+    }
+
+    private static String escapeHtml(String text) {
+        if (text == null) {
+            return "";
+        }
+        return text.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;");
+    }
+
+    private static byte[] bytes(String text) {
+        return text.getBytes(StandardCharsets.UTF_8);
+    }
+
+    // ================================================================
+    //  Xbox / Minecraft 换令牌
+    // ================================================================
+
+    private void finishXboxLogin(String msAccessToken, Consumer<String> onStateChange,
+                                 Consumer<LoginResult> onComplete) throws Exception {
+        onStateChange.accept(I18n.t("account.ms.state.xbox"));
+        Map<String, Object> xblPayload = Map.of(
+                "Properties", Map.of("AuthMethod", "RPS",
+                        "SiteName", "user.auth.xboxlive.com",
+                        "RpsTicket", "d=" + msAccessToken),
+                "RelyingParty", "http://auth.xboxlive.com",
+                "TokenType", "JWT");
+        JsonNode xblNode = this.postJson(XBL_URL, xblPayload);
+        String xblToken = xblNode.path("Token").asText("");
+        String uhs = firstXuiUhs(xblNode);
+        if (xblToken.isEmpty() || uhs.isEmpty()) {
+            throw new AuthException(I18n.t("account.ms.xbox_failed", responseHint(xblNode)));
+        }
+
+        onStateChange.accept(I18n.t("account.ms.state.xsts"));
+        Map<String, Object> xstsPayload = Map.of(
+                "Properties", Map.of("SandboxId", "RETAIL", "UserTokens", List.of(xblToken)),
+                "RelyingParty", "rp://api.minecraftservices.com/",
+                "TokenType", "JWT");
+        JsonNode xstsNode = this.postJson(XSTS_URL, xstsPayload);
+        if (xstsNode.has("XErr")) {
             throw new AuthException(xstsErrorMessage(xstsNode.path("XErr").asLong()));
-         } else {
-            String xstsToken = xstsNode.path("Token").asText("");
-            String xstsUhs = firstXuiUhs(xstsNode);
-            if (!xstsToken.isEmpty() && !xstsUhs.isEmpty()) {
-               onStateChange.accept("正在登录 Minecraft…");
-               Map<String, Object> mcPayload = Map.of("identityToken", "XBL3.0 x=" + xstsUhs + ";" + xstsToken);
+        }
 
-               JsonNode mcNode;
-               try {
-                  mcNode = this.postJson("https://api.minecraftservices.com/authentication/login_with_xbox", mcPayload);
-               } catch (AuthException mcError) {
-                  String message = mcError.getMessage() == null ? "" : mcError.getMessage();
-                  if (message.contains("429")) {
-                     throw new AuthException("Minecraft 登入被限流（HTTP 429）。\n这是同一个应用 ID 短时间内请求过多导致的，不是账号或权限问题。\n请等待 15~20 分钟后再试一次（期间不要重复点击登录）。");
-                  }
+        String xstsToken = xstsNode.path("Token").asText("");
+        String xstsUhs = firstXuiUhs(xstsNode);
+        if (xstsToken.isEmpty() || xstsUhs.isEmpty()) {
+            throw new AuthException(I18n.t("account.ms.xsts_failed", responseHint(xstsNode)));
+        }
 
-                  if (!message.contains("Invalid app registration") && !message.contains("AppRegInfo")) {
-                     throw new AuthException(message + "\n\n" + xstsClaimsSummary(xstsToken));
-                  }
+        onStateChange.accept(I18n.t("account.ms.state.minecraft"));
+        Map<String, Object> mcPayload = Map.of(
+                "identityToken", "XBL3.0 x=" + xstsUhs + ";" + xstsToken);
 
-                  throw new AuthException("Minecraft 服务拒绝了当前应用 ID（403）。\n\n" + message + "\n\n" + xstsClaimsSummary(xstsToken));
-               }
-
-               String mcAccessToken = mcNode.path("access_token").asText("");
-               if (mcAccessToken.isEmpty()) {
-                  throw new AuthException("Minecraft 登录失败（该账号可能没有购买 Java 版）：" + responseHint(mcNode));
-               } else {
-                  long expiresIn = mcNode.path("expires_in").asLong(86400L);
-                  onStateChange.accept("正在获取账户信息…");
-                  HttpRequest profileReq = HttpRequest.newBuilder(URI.create("https://api.minecraftservices.com/minecraft/profile")).header("Authorization", "Bearer " + mcAccessToken).header("User-Agent", "BriskLauncher/1.0.0").timeout(TIMEOUT).GET().build();
-                  HttpResponse<String> profileResp = Http.authClient().send(profileReq, BodyHandlers.ofString(StandardCharsets.UTF_8));
-                  if (profileResp.statusCode() != 200) {
-                     throw new AuthException("获取 Minecraft 档案失败（HTTP " + profileResp.statusCode() + "），请确认该账号已购买 Java 版并创建过角色");
-                  } else {
-                     JsonNode profileNode = this.mapper.readTree((String)profileResp.body());
-                     String uuid = profileNode.path("id").asText("");
-                     String name = profileNode.path("name").asText("");
-                     if (!uuid.isEmpty() && !name.isEmpty()) {
-                        StoredSession session = new StoredSession(AccountType.MICROSOFT, uuid, name, (char[])null, mcAccessToken.toCharArray(), System.currentTimeMillis() + expiresIn * 1000L, (String)null);
-                        SafeLog.loginSuccess(AccountType.MICROSOFT);
-                        onComplete.accept(LoginResult.ok(session));
-                     } else {
-                        throw new AuthException("Minecraft 档案缺少角色信息，请先在官方启动器创建角色");
-                     }
-                  }
-               }
-            } else {
-               throw new AuthException("XSTS 授权失败：" + responseHint(xstsNode));
+        JsonNode mcNode;
+        try {
+            mcNode = this.postJson(MC_LOGIN_URL, mcPayload);
+        } catch (AuthException mcError) {
+            logXstsClaims(xstsToken);
+            String message = mcError.getMessage() == null ? "" : mcError.getMessage();
+            if (message.contains("429")) {
+                throw new AuthException(I18n.t("account.ms.rate_limited"));
             }
-         }
-      } else {
-         throw new AuthException("Xbox Live 登录失败：" + responseHint(xblNode));
-      }
-   }
+            if (!message.contains("Invalid app registration") && !message.contains("AppRegInfo")) {
+                throw new AuthException(message + "\n\n" + xstsClaimsSummary(xstsToken));
+            }
+            throw new AuthException(I18n.t("account.ms.app_rejected",
+                    message + "\n\n" + xstsClaimsSummary(xstsToken)));
+        }
 
-   private JsonNode postJson(String url, Object payload) throws Exception {
-      String body = this.mapper.writeValueAsString(payload);
-      HttpRequest request = HttpRequest.newBuilder(URI.create(url)).header("Content-Type", "application/json").header("Accept", "application/json").header("User-Agent", "BriskLauncher/1.0.0").timeout(TIMEOUT).POST(BodyPublishers.ofString(body)).build();
-      HttpResponse<String> response = Http.authClient().send(request, BodyHandlers.ofString(StandardCharsets.UTF_8));
-      JsonNode node = this.mapper.readTree(response.body() != null && !((String)response.body()).isBlank() ? (String)response.body() : "{}");
-      if (response.statusCode() != 200 && !node.has("XErr")) {
-         int var10002 = response.statusCode();
-         String raw = (String)response.body();
-         if (raw != null && raw.length() > 1200) {
-            raw = raw.substring(0, 1200) + "…";
-         }
+        String mcAccessToken = mcNode.path("access_token").asText("");
+        if (mcAccessToken.isEmpty()) {
+            throw new AuthException(I18n.t("account.ms.no_java_edition", responseHint(mcNode)));
+        }
 
-         throw new AuthException("HTTP " + var10002 + " @ " + URI.create(url).getHost() + "：" + responseHint(node) + "\n\n原始响应：\n" + raw);
-      } else {
-         return node;
-      }
-   }
+        long expiresIn = mcNode.path("expires_in").asLong(86400L);
+        onStateChange.accept(I18n.t("account.ms.state.profile"));
+        HttpRequest profileReq = HttpRequest.newBuilder(URI.create(MC_PROFILE_URL))
+                .header("Authorization", "Bearer " + mcAccessToken)
+                .header("User-Agent", USER_AGENT)
+                .timeout(TIMEOUT)
+                .GET()
+                .build();
+        HttpResponse<String> profileResp = Http.authClient()
+                .send(profileReq, BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (profileResp.statusCode() != 200) {
+            throw new AuthException(I18n.t("account.ms.profile_failed",
+                    String.valueOf(profileResp.statusCode())));
+        }
 
-   private static String firstXuiUhs(JsonNode node) {
-      JsonNode xui = node.path("DisplayClaims").path("xui");
-      return xui.isArray() && !xui.isEmpty() ? xui.get(0).path("uhs").asText("") : "";
-   }
+        JsonNode profileNode = this.mapper.readTree(profileResp.body());
+        String uuid = profileNode.path("id").asText("");
+        String name = profileNode.path("name").asText("");
+        if (uuid.isEmpty() || name.isEmpty()) {
+            throw new AuthException(I18n.t("account.ms.profile_missing"));
+        }
 
-   private static String describeOAuthError(JsonNode node) {
-      String description = node.path("error_description").asText("");
-      String error = node.path("error").asText("");
-      if (!description.contains("AADSTS700016") && !"unauthorized_client".equals(error)) {
-         if (!description.isBlank()) {
-            return description;
-         } else {
-            return error.isBlank() ? responseHint(node) : error;
-         }
-      } else {
-         return "微软客户端 ID 无效或已被停用。请在“设置 → 网络”里填写你自己的 Azure 应用客户端 ID（需启用设备代码流并申请 Minecraft API 权限），具体步骤见设置页的帮助链接。";
-      }
-   }
+        StoredSession session = new StoredSession(AccountType.MICROSOFT, uuid, name,
+                (char[]) null, mcAccessToken.toCharArray(),
+                System.currentTimeMillis() + expiresIn * 1000L, (String) null);
+        SafeLog.loginSuccess(AccountType.MICROSOFT);
+        onComplete.accept(LoginResult.ok(session));
+    }
 
-   private static String responseHint(JsonNode node) {
-      for(String key : List.of("error_description", "errorMessage", "error", "message", "path")) {
-         String value = node.path(key).asText("");
-         if (!value.isBlank()) {
-            return value.length() > 200 ? value.substring(0, 200) + "…" : value;
-         }
-      }
+    // ================================================================
+    //  HTTP / JSON 工具
+    // ================================================================
 
-      return "响应格式不正确";
-   }
+    private JsonNode postForm(String url, String body) throws Exception {
+        HttpRequest request = HttpRequest.newBuilder(URI.create(url))
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .header("Accept", "application/json")
+                .header("User-Agent", USER_AGENT)
+                .timeout(TIMEOUT)
+                .POST(BodyPublishers.ofString(body))
+                .build();
+        HttpResponse<String> response = Http.authClient()
+                .send(request, BodyHandlers.ofString(StandardCharsets.UTF_8));
+        return this.mapper.readTree(response.body());
+    }
 
-   private static String xstsErrorMessage(long xerr) {
-      if (xerr == 2148916233L) {
-         return "该 Microsoft 账号还没有 Xbox 账号，请先在 xbox.com 创建";
-      } else if (xerr == 2148916235L) {
-         return "Xbox Live 在你所在地区不可用";
-      } else if (xerr != 2148916236L && xerr != 2148916237L) {
-         return xerr == 2148916238L ? "这是一个儿童账号，需要先加入家庭组" : "XSTS 授权失败（XErr=" + xerr + "）";
-      } else {
-         return "该账号需要完成年龄验证";
-      }
-   }
+    private JsonNode postJson(String url, Object payload) throws Exception {
+        String body = this.mapper.writeValueAsString(payload);
+        HttpRequest request = HttpRequest.newBuilder(URI.create(url))
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json")
+                .header("User-Agent", USER_AGENT)
+                .timeout(TIMEOUT)
+                .POST(BodyPublishers.ofString(body))
+                .build();
+        HttpResponse<String> response = Http.authClient()
+                .send(request, BodyHandlers.ofString(StandardCharsets.UTF_8));
+        String raw = response.body();
+        JsonNode node = this.mapper.readTree(raw != null && !raw.isBlank() ? raw : "{}");
+        if (response.statusCode() != 200 && !node.has("XErr")) {
+            if (raw != null && raw.length() > 1200) {
+                raw = raw.substring(0, 1200) + "…";
+            }
+            // 原始回应体可能包含 application ID（AADSTS 就会回显）→ 统一打码
+            throw new AuthException("HTTP " + response.statusCode() + " @ "
+                    + URI.create(url).getHost() + "：" + responseHint(node)
+                    + "\n\n" + I18n.t("account.ms.raw_response") + "\n" + Redactor.mask(raw));
+        }
+        return node;
+    }
 
-   private static String safeError(Exception error) {
-      String message = error.getMessage();
-      if (message != null && !message.isBlank()) {
-         return message.length() > 300 ? message.substring(0, 300) + "…" : message;
-      } else {
-         return "登录失败：" + error.getClass().getSimpleName();
-      }
-   }
+    private static String firstXuiUhs(JsonNode node) {
+        JsonNode xui = node.path("DisplayClaims").path("xui");
+        return xui.isArray() && !xui.isEmpty() ? xui.get(0).path("uhs").asText("") : "";
+    }
 
-   private static String encode(String raw) {
-      return URLEncoder.encode(raw, StandardCharsets.UTF_8);
-   }
+    private static String describeOAuthError(JsonNode node) {
+        String description = node.path("error_description").asText("");
+        String error = node.path("error").asText("");
+        if ("unauthorized_client".equals(error) || description.contains("AADSTS700016")) {
+            return I18n.t("account.ms.client_id_invalid");
+        }
+        String text = !description.isBlank() ? description : (!error.isBlank() ? error : responseHint(node));
+        return Redactor.mask(text);
+    }
 
-   public LoginResult refresh(StoredSession session) {
-      // 刻意不保存 refresh token（见 README 安全说明），所以只能请用户重新登录
-      return LoginResult.fail(com.brisklauncher.mcl.i18n.I18n.t("account.ms.refresh_unsupported"));
-   }
+    private static String responseHint(JsonNode node) {
+        for (String key : List.of("error_description", "errorMessage", "error", "message", "path")) {
+            String value = node.path(key).asText("");
+            if (!value.isBlank()) {
+                return Redactor.mask(value.length() > 200 ? value.substring(0, 200) + "…" : value);
+            }
+        }
+        return I18n.t("account.ms.bad_response");
+    }
 
-   public boolean validate(StoredSession session) {
-      return session != null && !session.isExpired();
-   }
+    /**
+     * 展示给使用者的 XSTS 摘要。
+     *
+     * <p>安全审计 L-05：以前会把 appid / xtid 的值拼进错误文本，使用者截图求助就泄漏账号标识。
+     * 现在只给「有没有」这种布林讯息（与 {@link #logXstsClaims} 口径一致）。
+     */
+    private static String xstsClaimsSummary(String jwt) {
+        try {
+            String[] parts = jwt.split("\\.");
+            if (parts.length < 2) {
+                return I18n.t("account.ms.claims_unparsable");
+            }
+            JsonNode claims = Http.mapper().readTree(Base64.getUrlDecoder().decode(parts[1]));
+            return I18n.t("account.ms.claims_summary",
+                    claims.has("rp") ? I18n.t("common.yes") : I18n.t("common.no"),
+                    claims.has("xui") ? I18n.t("common.yes") : I18n.t("common.no"),
+                    claims.has("xtid") ? I18n.t("common.yes") : I18n.t("common.no"));
+        } catch (Exception error) {
+            return I18n.t("account.ms.claims_failed");
+        }
+    }
 
-   public GameSession toGameSession(StoredSession session) {
-      return new GameSession(session.name(), session.uuid(), session.accessToken(), "msa", "{}", (String)null);
-   }
+    private static void logXstsClaims(String jwt) {
+        try {
+            String[] parts = jwt.split("\\.");
+            if (parts.length < 2) {
+                return;
+            }
+            JsonNode claims = Http.mapper().readTree(Base64.getUrlDecoder().decode(parts[1]));
+            // 只记录「有没有」这种布林讯息，不打印 appid/xtid 的值
+            SafeLog.info("XSTS 声明校验通过（rp=" + (claims.has("rp") ? "有" : "无")
+                    + ", xui=" + (claims.has("xui") ? "有" : "无")
+                    + ", xtid=" + (claims.has("xtid") ? "有" : "无") + "）");
+        } catch (Exception ignored) {
+            // 解析失败不影响登录
+        }
+    }
 
-   public static record DeviceCodeFlow(String userCode, URI verificationUri, String deviceCode, int interval, int expiresIn) {
-   }
+    private static String xstsErrorMessage(long xerr) {
+        if (xerr == 2148916233L) {
+            return I18n.t("account.ms.xerr.no_xbox_account");
+        } else if (xerr == 2148916235L) {
+            return I18n.t("account.ms.xerr.region");
+        } else if (xerr == 2148916236L || xerr == 2148916237L) {
+            return I18n.t("account.ms.xerr.age_verify");
+        } else if (xerr == 2148916238L) {
+            return I18n.t("account.ms.xerr.child");
+        }
+        return I18n.t("account.ms.xerr.other", String.valueOf(xerr));
+    }
+
+    private static String safeError(Exception error) {
+        String message = error.getMessage();
+        if (message != null && !message.isBlank()) {
+            return Redactor.mask(message.length() > 300 ? message.substring(0, 300) + "…" : message);
+        }
+        return I18n.t("account.ms.failed_generic", error.getClass().getSimpleName());
+    }
+
+    private static String encode(String raw) {
+        return URLEncoder.encode(raw, StandardCharsets.UTF_8);
+    }
+
+    public LoginResult refresh(StoredSession session) {
+        // 刻意不保存 refresh token（scope 里也没有 offline_access），所以只能请使用者重新登录
+        return LoginResult.fail(I18n.t("account.ms.refresh_unsupported"));
+    }
+
+    public boolean validate(StoredSession session) {
+        return session != null && !session.isExpired();
+    }
+
+    public GameSession toGameSession(StoredSession session) {
+        return new GameSession(session.name(), session.uuid(), session.accessToken(), "msa", "{}", (String) null);
+    }
 }

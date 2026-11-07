@@ -1,0 +1,77 @@
+/* 高对比 / High contrast — 纯白底、近黑文字、加粗边框、深蓝主色。
+ *
+ * 只改设计变量；额外规则只调「粗细」，不再写死颜色，
+ * 所以不会出现「深色底 + 深色字」这种看不清的组合。
+ */
+
+.root {
+    -brisk-bg: #FFFFFF;
+    -brisk-bg-soft: #F2F5FA;
+    -brisk-surface: #FFFFFF;
+    -brisk-surface-2: #EDF1F7;
+    -brisk-surface-3: #E2E8F2;
+    -brisk-surface-hover: #E8EEFA;
+    -brisk-surface-selected: #D9E3F7;
+    -brisk-glass: rgba(255, 255, 255, 0.9);
+    -brisk-glass-strong: rgba(255, 255, 255, 0.97);
+    -brisk-overlay: rgba(255, 255, 255, 0.98);
+    -brisk-overlay-solid: #FFFFFF;
+    -brisk-scrim: rgba(0, 0, 0, 0.5);
+
+    -brisk-border: #1A1A1A;
+    -brisk-border-soft: #7A7A7A;
+    -brisk-border-2: #4D4D4D;
+    -brisk-border-strong: #000000;
+
+    -brisk-text: #000000;
+    -brisk-text-body: #1A1A1A;
+    -brisk-text-dim: #333333;
+    -brisk-text-muted: #4D4D4D;
+    -brisk-text-faint: #666666;
+    -brisk-text-tag: #001F4D;
+
+    -brisk-accent: #003C96;
+    -brisk-accent-2: #002F75;
+    -brisk-accent-strong: #0050C8;
+    -brisk-accent-soft: #3C74CC;
+    -brisk-accent-deep: #001F4D;
+    -brisk-accent-border: #003C96;
+    -brisk-on-accent: #FFFFFF;
+
+    -brisk-warn-text: #8A4B00;
+    -brisk-warn-bg: #FFF0D0;
+    -brisk-warn-glass: rgba(255, 240, 208, 0.85);
+    -brisk-danger: #B30000;
+    -brisk-ok: #1B6B3A;
+    -brisk-warning: #8A4B00;
+
+    -brisk-shadow: rgba(0, 0, 0, 0.22);
+    -brisk-shadow-strong: rgba(0, 0, 0, 0.35);
+    -brisk-accent-shadow: rgba(0, 60, 150, 0.28);
+    -brisk-topbar-from: #FFFFFF;
+    -brisk-topbar-to: #F2F5FA;
+}
+
+/* 加粗边框：颜色已经在 token 里（-brisk-border = 近黑） */
+.root-pane,
+.card,
+.list-view,
+.text-field {
+    -fx-border-width: 2;
+}
+
+.section-title {
+    -fx-font-size: 16px;
+}
+
+.nav-button {
+    -fx-font-weight: bold;
+}
+
+/* 主按钮：深蓝底 + 白字（对比最强），阴影去掉避免发虚 */
+.primary-button {
+    -fx-effect: none;
+    -fx-border-color: -brisk-accent-deep;
+    -fx-border-width: 2;
+    -fx-border-radius: 12;
+}

@@ -132,7 +132,7 @@ public final class ScreenshotDialog {
         dialog.setTitle(I18n.t("screenshot.title"));
 
         Label title = new Label("📷 " + I18n.t("screenshot.title") + " · " + entry.id());
-        title.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #14453F;");
+        title.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: -brisk-text;");
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
         Button close = UiKit.closeButtonStyled();
@@ -145,8 +145,8 @@ public final class ScreenshotDialog {
         root.setTop(header);
         root.setCenter(createPanel(context, entry));
         BorderPane.setMargin(root.getCenter(), new Insets(10, 0, 0, 0));
-        root.setStyle("-fx-background-color: #F4FCFA; -fx-background-radius: 12;"
-                + " -fx-border-color: #BFE9E2; -fx-border-radius: 12;"
+        root.setStyle("-fx-background-color: -brisk-bg; -fx-background-radius: 12;"
+                + " -fx-border-color: -brisk-border; -fx-border-radius: 12;"
                 + " -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.2), 15, 0, 0, 5);");
 
         Scene scene = new Scene(root, 900, 620);
@@ -193,11 +193,11 @@ public final class ScreenshotDialog {
         preview.setMinSize(TILE_WIDTH, TILE_HEIGHT);
         preview.setPrefSize(TILE_WIDTH, TILE_HEIGHT);
         preview.setMaxSize(TILE_WIDTH, TILE_HEIGHT);
-        preview.setStyle("-fx-background-color: #E4F8F4; -fx-background-radius: 10;");
+        preview.setStyle("-fx-background-color: -brisk-surface-selected; -fx-background-radius: 10;");
         preview.getChildren().add(thumbnail(file));
 
         Label name = new Label(file.getFileName().toString());
-        name.setStyle("-fx-font-size: 11px; -fx-text-fill: #14453F;");
+        name.setStyle("-fx-font-size: 11px; -fx-text-fill: -brisk-text;");
         name.setMaxWidth(TILE_WIDTH);
         name.setTextOverrun(javafx.scene.control.OverrunStyle.ELLIPSIS);
         Label time = new Label(TIME.format(Instant.ofEpochMilli(lastModified(file))

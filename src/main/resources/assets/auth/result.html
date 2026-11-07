@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="dark light">
+<title>%%TITLE%% · %%BRAND%%</title>
+<!--
+  由 Brisk Launcher 内的 loopback 回呼直接下发。
+  安全约束（改样式时务必保留）：
+    1. 不引用任何外部资源（字体 / 图片 / 脚本 / CDN），否则登录 URL 里的参数可能随 Referer 外泄，
+       而且离线时页面会打不开；
+    2. 不写 cookie / localStorage，不回显任何 query 参数；
+    3. 不自动跳转到任何地址（避免被当成钓鱼跳板）。
+  占位符：%%BRAND%% %%TITLE%% %%BODY%% %%HINT%% %%ACCENT%% %%ICON%%
+-->
+<style>
+  :root { color-scheme: dark light; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: #1b1d21;
+    color: #e6e8eb;
+    font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .card {
+    width: 100%;
+    max-width: 420px;
+    padding: 32px 28px 26px;
+    border-radius: 16px;
+    background: #23262b;
+    border: 1px solid #33373d;
+    box-shadow: 0 18px 48px rgba(0, 0, 0, .45);
+    text-align: center;
+  }
+  .mark {
+    width: 56px;
+    height: 56px;
+    margin: 0 auto 18px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in srgb, %%ACCENT%% 18%, transparent);
+    border: 1px solid color-mix(in srgb, %%ACCENT%% 45%, transparent);
+  }
+  .mark svg { width: 28px; height: 28px; display: block; }
+  .mark svg * { stroke: %%ACCENT%%; }
+  h1 {
+    margin: 0 0 10px;
+    font-size: 20px;
+    line-height: 1.35;
+    font-weight: 650;
+    letter-spacing: .01em;
+  }
+  p {
+    margin: 0;
+    font-size: 13.5px;
+    line-height: 1.65;
+    color: #a8adb5;
+  }
+  .hint {
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid #33373d;
+    font-size: 12px;
+    color: #7d838c;
+  }
+  .brand {
+    margin-bottom: 14px;
+    font-size: 11.5px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: #7d838c;
+  }
+  @media (prefers-color-scheme: light) {
+    body { background: #f4f5f7; color: #1f2328; }
+    .card { background: #fff; border-color: #dfe2e6; box-shadow: 0 18px 48px rgba(16, 22, 32, .12); }
+    p { color: #57606a; }
+    .hint { border-top-color: #e6e8eb; color: #8b929b; }
+    .brand { color: #8b929b; }
+  }
+</style>
+</head>
+<body>
+  <main class="card">
+    <div class="brand">%%BRAND%%</div>
+    <div class="mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        %%ICON%%
+      </svg>
+    </div>
+    <h1>%%TITLE%%</h1>
+    <p>%%BODY%%</p>
+    <p class="hint">%%HINT%%</p>
+  </main>
+</body>
+</html>

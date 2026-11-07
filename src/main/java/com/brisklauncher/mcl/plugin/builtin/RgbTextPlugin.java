@@ -1,8 +1,8 @@
 package com.brisklauncher.mcl.plugin.builtin;
 
 import com.brisklauncher.mcl.i18n.I18n;
-import com.brisklauncher.mcl.plugin.LauncherPlugin;
-import com.brisklauncher.mcl.plugin.PluginContext;
+import com.brisklauncher.mcl.plugin.api.LauncherPlugin;
+import com.brisklauncher.mcl.plugin.api.PluginContext;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
@@ -47,6 +47,9 @@ import java.util.Locale;
  * </ul>
  *
  * <p>支援**渐变**：选两个颜色，逐字插色。
+ *
+ * <p>theme-guard: exempt —— 下面预览区用的颜色是「Minecraft 聊天栏 / 物品说明 / 告示牌」的
+ * 模拟底色，必须固定，不能跟着启动器主题变（否则预览就失真了）。
  */
 public final class RgbTextPlugin implements LauncherPlugin {
 
@@ -570,7 +573,7 @@ public final class RgbTextPlugin implements LauncherPlugin {
         button.setPrefSize(22, 22);
         button.setMaxSize(22, 22);
         button.setStyle("-fx-background-color: " + toHex(color) + ";"
-                + " -fx-background-radius: 5; -fx-border-color: #A8D8D1; -fx-border-radius: 5;"
+                + " -fx-background-radius: 5; -fx-border-color: -brisk-border-2; -fx-border-radius: 5;"
                 + " -fx-padding: 0;");
         button.setTooltip(new javafx.scene.control.Tooltip("§" + code + "  " + toHex(color)));
         button.setOnAction(e -> {

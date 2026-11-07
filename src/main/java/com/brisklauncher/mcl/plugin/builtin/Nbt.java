@@ -69,8 +69,7 @@ final class Nbt {
     private static Object readPayload(DataInputStream input, int type, int depth, long[] budget)
             throws IOException {
         if (depth > com.brisklauncher.mcl.security.InputBudget.MAX_NBT_DEPTH) {
-            throw new IOException("NBT 巢状过深（> "
-                    + com.brisklauncher.mcl.security.InputBudget.MAX_NBT_DEPTH + " 层），疑似恶意档案");
+            throw new IOException(com.brisklauncher.mcl.i18n.I18n.t("tools.nbt.too_deep", com.brisklauncher.mcl.security.InputBudget.MAX_NBT_DEPTH));
         }
         switch (type) {
             case TAG_BYTE:
@@ -139,7 +138,7 @@ final class Nbt {
                 return values;
             }
             default:
-                throw new IOException("未知的 NBT tag 型别：" + type);
+                throw new IOException(com.brisklauncher.mcl.i18n.I18n.t("tools.nbt.unknown_tag", type));
         }
     }
 
@@ -147,14 +146,14 @@ final class Nbt {
     private static void charge(long[] budget, long bytes) throws IOException {
         budget[0] -= bytes;
         if (budget[0] < 0) {
-            throw new IOException("NBT 内容超出解析预算，已拒绝载入");
+            throw new IOException(com.brisklauncher.mcl.i18n.I18n.t("tools.nbt.budget"));
         }
     }
 
     /** 長度檢查：防止損壞檔案直接把記憶體吃光。 */
     private static void check(int length) throws IOException {
         if (length < 0 || length > com.brisklauncher.mcl.security.InputBudget.MAX_NBT_ARRAY) {
-            throw new IOException("NBT 长度异常：" + length);
+            throw new IOException(com.brisklauncher.mcl.i18n.I18n.t("tools.nbt.bad_length", length));
         }
     }
 

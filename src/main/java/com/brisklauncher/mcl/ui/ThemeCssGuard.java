@@ -11,7 +11,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 第三方主题包（{@code data/themes/<id>/theme.css}）的静态检查（安全审计 v3 A-14）。
+ * 第三方主题包（{@code data/themes/<id>/*.css}）的静态检查（安全审计 v3 A-14）。
  *
  * <p>为什么要检查：JavaFX CSS 的 {@code url()} 支援 {@code http}/{@code https}/{@code file}/{@code jar}。
  * 一个「主题包」是玩家从群里下载、解压到 {@code data/themes/} 的档案 —— 于是它可以：
@@ -23,8 +23,10 @@ import java.util.regex.Pattern;
  *
  * <p>规则：只允许 {@code data:} 与「同目录相对路径」；拒绝 http/https/file/jar/协议相对；
  * 拒绝 {@code @font-face}。检查失败就**不加载**并记 WARNING（不弹窗，避免每次启动都打扰）。
+ *
+ * <p>一个主题包可以有多个 CSS（见 {@code theme.json} 的 {@code styles}），逐个检查。
  */
-final class ThemeCssGuard {
+public final class ThemeCssGuard {
 
     private static final Pattern URL = Pattern.compile(
             "url\\(\\s*['\"]?([^'\")]*)", Pattern.CASE_INSENSITIVE);
@@ -35,7 +37,7 @@ final class ThemeCssGuard {
     }
 
     /** @return {@code true} 表示可以載入 */
-    static boolean allowed(Path css) {
+    public static boolean allowed(Path css) {
         try {
             if (css == null || !Files.isRegularFile(css)) {
                 return false;

@@ -1,0 +1,54 @@
+/* 范例：午夜紫 / Sample: Midnight Purple
+ *
+ * 这个范例刻意只改「设计变量」（-brisk-*），所以整个启动器（含对话框、
+ * ComboBox / Spinner / CheckBox / ScrollBar 这些原生控件）会一起换色。
+ * 颜色变量的完整清单见 THEME_DEV.md 的「设计变量」一节。
+ */
+
+.root {
+    -brisk-bg: #14101F;
+    -brisk-bg-soft: #1A1428;
+    -brisk-surface: #1E1830;
+    -brisk-surface-2: #2A2140;
+    -brisk-surface-3: #332A4D;
+    -brisk-surface-hover: #2E2547;
+    -brisk-surface-selected: #372B55;
+    -brisk-glass: rgba(26, 20, 40, 0.66);
+    -brisk-glass-strong: rgba(26, 20, 40, 0.86);
+    -brisk-overlay: rgba(26, 20, 40, 0.97);
+    -brisk-overlay-solid: #1E1830;
+    -brisk-scrim: rgba(10, 6, 18, 0.6);
+
+    -brisk-border: #332A4D;
+    -brisk-border-soft: #2A2140;
+    -brisk-border-2: #443A63;
+    -brisk-border-strong: #55477A;
+
+    -brisk-text: #EDE8FA;
+    -brisk-text-body: #D6CEEA;
+    -brisk-text-dim: #B0A4CC;
+    -brisk-text-muted: #9C8FC0;
+    -brisk-text-faint: #7E7399;
+    -brisk-text-tag: #D6CEEA;
+
+    -brisk-accent: #B79CFF;
+    -brisk-accent-2: #A98BFF;
+    -brisk-accent-strong: #8A6BE8;
+    -brisk-accent-soft: #6B55B8;
+    -brisk-accent-deep: #C9B6FF;
+    -brisk-accent-border: #55477A;
+    -brisk-on-accent: #14101F;
+
+    -brisk-warn-text: #E6C08A;
+    -brisk-warn-bg: #3A2E22;
+    -brisk-warn-glass: rgba(58, 46, 34, 0.7);
+    -brisk-danger: #E57373;
+    -brisk-ok: #7BC98B;
+    -brisk-warning: #E6C08A;
+
+    -brisk-shadow: rgba(0, 0, 0, 0.35);
+    -brisk-shadow-strong: rgba(0, 0, 0, 0.5);
+    -brisk-accent-shadow: rgba(183, 156, 255, 0.22);
+    -brisk-topbar-from: #1D1730;
+    -brisk-topbar-to: #14101F;
+}

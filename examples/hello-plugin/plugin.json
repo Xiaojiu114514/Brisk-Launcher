@@ -1,0 +1,11 @@
+{
+  "id": "hello-plugin",
+  "name": "Hello Plugin",
+  "class": "com.example.hello.HelloPlugin",
+  "description": "示例插件：工具面板 + 导航页 + 自订配置 + 语言包",
+  "version": "1.0.0",
+  "author": "Brisk Launcher",
+  "homepage": "https://github.com/Xiaojiu114514/Brisk-Launcher",
+  "icon": "👋",
+  "apiVersion": 2
+}

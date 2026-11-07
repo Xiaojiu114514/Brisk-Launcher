@@ -9,13 +9,24 @@ isolation by default, multi-threaded downloads.
 
 ## Features
 
-- Vanilla / Forge / NeoForge / Fabric installs, the loader is merged into the version, isolation by default
-- Modpack import and export; mods, resource packs, shaders, worlds and configs
-- Microsoft / offline / third-party accounts, multi-language UI, spark report and crash analysis
-
+- Multiple game roots and instances, with version-isolated folders and per-instance settings (Java, memory, arguments).
+- Fabric / Forge / NeoForge installers, modpack import and export.
+- **Launcher plugins**: drop a jar into `data/plugins/` and the launcher loads it (new pages, tools, plugin API).
+- **Third-party themes**: put a folder under `data/themes/<id>/` with `theme.css` (optionally `theme.json` / `logo.png`). Themes switch instantly and are also applied to the native splash image.
+- **Extra languages**: put `messages.properties` under `data/lang/<locale>/`.
 ## Plugin development
 
-Plugin API, `plugin.json` format, lifecycle and packaging: **[Plugin development guide →](PLUGIN_DEV.md)**
+A plugin is a jar in `data\plugins\`. It can add a tool panel, a navigation page, its own language pack,
+its own config folder, services for other plugins, and even account (auth) providers.
+API reference, `plugin.json` format, lifecycle, packaging and a working sample:
+**[Plugin development guide →](PLUGIN_DEV.md)** · [sample plugin](examples/hello-plugin/)
+
+## Theme development
+
+Themes are CSS packs in `data\themes\` with an optional `theme.json` (multi-language name, multiple
+CSS files, background image with fit/dim, settings thumbnail). Three themes ship with the launcher
+(`night`, `sakura`, `contrast`) and switching is instant.
+**[Theme development guide →](THEME_DEV.md)** · [sample theme](examples/my-theme/)
 
 ## Requirements
 
@@ -25,22 +36,27 @@ Plugin API, `plugin.json` format, lifecycle and packaging: **[Plugin development
 ## Build & run
 
 ```bat
-set JAVA_HOME=C:\Program Files\Java\jdk-21
-mvn -o compile
-gradle installDist installLauncherScripts
-build\install\brisk-launcher\Brisk Launcher.vbs
+set GRADLE_USER_HOME=%CD%\.cache\gradle
+gradle bootExe
 ```
 
-Debug (console visible): `build\install\brisk-launcher\Brisk Launcher Debug.cmd`
+Output: `build\distributions\BriskLauncher.exe` — one self-contained file (~30 MB) with all jars embedded. It extracts them to `runtime/lib/` on first launch and starts the JVM.
 
+- Building needs JDK 21; the produced exe also needs Java 21 at runtime and downloads it to `data/jre` on first launch if missing.
+- Directory build (for development): `gradle installDist`, then `build\install\brisk-launcher\Brisk Launcher.vbs`.
+- Releasing: upload **only** `BriskLauncher.exe` to GitHub Releases. The built-in updater downloads that same exe and replaces itself after the launcher exits.
 ## Data locations
 
-| Path | Content |
-|---|---|
-| `%LOCALAPPDATA%\BriskLauncher\` | accounts and sessions, launcher settings (private, owner-only ACL) |
-| `<launcher>\data\` | cache, logs, downloaded JDK, themes, plugins, `crash-rules.json` |
-| `versions/<name>/` | one folder per instance (isolated mods / config / saves) |
+Everything the launcher writes lives next to the exe (portable), except the account list:
 
+| Path | Contents |
+|---|---|
+| `runtime/lib/` | jars extracted from the exe on first launch; reused and pruned automatically |
+| `data/` | launcher settings, themes, language packs, plugins, logs, cache |
+| `minecraft/` | the built-in game directory (`versions/<id>/`) |
+| `%LOCALAPPDATA%\BriskLauncher\` | `accounts.json` and session tokens — shared by every copy of the launcher on this Windows user |
+
+Because accounts live outside `data/`, running the exe from another folder still sees the same accounts.
 ## License
 
 See [LICENSE](LICENSE).

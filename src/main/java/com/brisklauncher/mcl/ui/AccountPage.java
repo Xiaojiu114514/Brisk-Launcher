@@ -39,7 +39,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * 账户页：正版（设备码）/ 离线 / 第三方（Yggdrasil）三个标签。
+ * 账户页：正版（浏览器回呼）/ 离线 / 第三方（Yggdrasil）三个标签。
  *
  * <p>安全：密码只在请求体内流转，用完立即清零；令牌只进 Windows 凭据管理器；
  * 日志只记录“尝试 / 成功 / 刷新”三种事件（SafeLog 强制）。
@@ -115,7 +115,7 @@ public final class AccountPage extends VBox implements MclPage {
     @Override
     public void onShown() {
         if (System.getProperty("mcl.dev.logindialog") != null) {
-            Platform.runLater(this::startDeviceCodeLogin);
+            Platform.runLater(this::startMicrosoftLogin);
         }
         updateCurrentLabel();
         if (currentPaneBuilder != null) {
@@ -179,7 +179,7 @@ public final class AccountPage extends VBox implements MclPage {
     private VBox buildMicrosoftPane() {
         Button loginButton = new Button(I18n.t("account.microsoft.login"));
         loginButton.getStyleClass().add("primary-button");
-        loginButton.setOnAction(e -> startDeviceCodeLogin());
+        loginButton.setOnAction(e -> startMicrosoftLogin());
 
         // 官方网站 / 官方购买页：提倡购买正版（合规，也更容易通过 Mojang 审核）
         Button official = new Button(I18n.t("account.official_site"));
@@ -201,7 +201,8 @@ public final class AccountPage extends VBox implements MclPage {
         return box;
     }
 
-    private void startDeviceCodeLogin() {
+    /** 微软登录：系统浏览器 + loopback 回呼（设备码登录已移除，见 MicrosoftAuthProvider 的注释）。 */
+    private void startMicrosoftLogin() {
         Window owner = getScene().getWindow();
         Stage dialog = new Stage();
         dialog.initOwner(owner);
@@ -211,7 +212,7 @@ public final class AccountPage extends VBox implements MclPage {
         dialog.setTitle(I18n.t("account.microsoft.dialog_title"));
 
         Label title = new Label(I18n.t("account.microsoft.dialog_title"));
-        title.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #14453F;");
+        title.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: -brisk-text;");
         javafx.scene.layout.Region headerSpacer = new javafx.scene.layout.Region();
         HBox.setHgrow(headerSpacer, Priority.ALWAYS);
         Button headerClose = UiKit.closeButtonStyled();
@@ -219,84 +220,69 @@ public final class AccountPage extends VBox implements MclPage {
         HBox header = new HBox(8, title, headerSpacer, headerClose);
         header.setAlignment(Pos.CENTER_LEFT);
 
-        Label stateLabel = new Label(I18n.t("account.microsoft.requesting_code"));
+        Label stateLabel = new Label(I18n.t("account.microsoft.opening"));
         stateLabel.setWrapText(true);
         stateLabel.getStyleClass().add("instance-meta");
 
-        Label userCodeLabel = new Label();
-        userCodeLabel.getStyleClass().add("device-code");
-        Label uriLabel = new Label();
-        uriLabel.getStyleClass().add("cat-hint");
-        uriLabel.setWrapText(true);
-        uriLabel.setMaxWidth(320);
+        Label hintLabel = new Label();
+        hintLabel.setWrapText(true);
+        hintLabel.getStyleClass().add("cat-hint");
 
         ProgressBar progress = new ProgressBar(ProgressBar.INDETERMINATE_PROGRESS);
         progress.setMaxWidth(Double.MAX_VALUE);
         progress.getStyleClass().add("login-progress");
 
-        Button copyButton = new Button(I18n.t("account.microsoft.copy_code"));
-        copyButton.setOnAction(e -> {
+        // 「手动打开登录页」：自动开浏览器失败、或使用者把登录页关掉时用。
+        // URL 只在内存里（含 client_id + 一次性 state），默认不显示、不进日志。
+        final String[] authorizeUrl = {null};
+        Button openPageButton = new Button(I18n.t("account.microsoft.open_page"));
+        openPageButton.setVisible(false);
+        openPageButton.setManaged(false);
+        openPageButton.setOnAction(e -> {
+            String url = authorizeUrl[0];
+            if (url == null) {
+                return;
+            }
+            if (DesktopActions.openUrl(url)) {
+                hintLabel.setText(I18n.t("account.microsoft.open_page_hint"));
+                return;
+            }
+            // 连手动都打不开浏览器：把链接放剪贴板（贴在界面上等于把 URL 摆进截图）
             javafx.scene.input.ClipboardContent content = new javafx.scene.input.ClipboardContent();
-            content.putString(userCodeLabel.getText());
+            content.putString(url);
             javafx.scene.input.Clipboard.getSystemClipboard().setContent(content);
-            stateLabel.setText(I18n.t("account.microsoft.code_copied"));
+            hintLabel.setText(I18n.t("account.microsoft.open_page_copied"));
         });
 
-        Button openButton = new Button(I18n.t("account.microsoft.open_page"));
-        openButton.getStyleClass().add("primary-button");
-        openButton.setOnAction(e -> {
-            String uri = uriLabel.getText();
-            if (uri.startsWith("http") && !DesktopActions.openUrl(uri)) {
-                stateLabel.setText(I18n.t("account.microsoft.open_failed")
-                        + "\n" + I18n.t("account.microsoft.open_hint"));
-            }
+        Button settingsButton = new Button(I18n.t("account.microsoft.open_settings"));
+        settingsButton.setVisible(false);
+        settingsButton.setManaged(false);
+        settingsButton.setOnAction(e -> {
+            dialog.close();
+            com.brisklauncher.mcl.MclApplication.navigateToSettings();
         });
 
         Button closeButton = new Button(I18n.t("common.cancel"));
         closeButton.setOnAction(e -> dialog.close());
 
-        HBox codeRow = new HBox(10, userCodeLabel, copyButton);
-        codeRow.setAlignment(Pos.CENTER_LEFT);
-        codeRow.setVisible(false);
-        codeRow.setManaged(false);
-        HBox pageRow = new HBox(10, uriLabel, openButton);
-        pageRow.setAlignment(Pos.CENTER_LEFT);
-        pageRow.setVisible(false);
-        pageRow.setManaged(false);
-
-        // 两种登录方式：设备码（PCL 风格，复制代码）与 localhost 回呼（HMCL 风格）
-        Button browserButton = new Button(I18n.t("account.microsoft.browser_mode"));
-        Button settingsButton = new Button(I18n.t("account.microsoft.open_settings"));
-        settingsButton.setOnAction(e -> {
-            dialog.close();
-            com.brisklauncher.mcl.MclApplication.navigateToSettings();
-        });
-        Label clientIdHint = new Label();
-        clientIdHint.setWrapText(true);
-        clientIdHint.getStyleClass().add("cat-hint");
-
-        HBox footer = new HBox(8, progress, closeButton);
+        HBox footer = new HBox(8, progress, openPageButton, closeButton);
         footer.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(progress, Priority.ALWAYS);
 
-        javafx.scene.layout.VBox modeRow = new javafx.scene.layout.VBox(6,
-                browserButton, settingsButton, clientIdHint);
-        javafx.scene.layout.VBox card = new javafx.scene.layout.VBox(12,
-                header, stateLabel, codeRow, pageRow, modeRow, footer);
+        VBox card = new VBox(12, header, stateLabel, hintLabel, settingsButton, footer);
         card.setPadding(new Insets(18));
-        card.setStyle("-fx-background-color: #F4FCFA; -fx-background-radius: 12;"
-                + " -fx-border-color: #BFE9E2; -fx-border-radius: 12;"
+        card.setStyle("-fx-background-color: -brisk-bg; -fx-background-radius: 12;"
+                + " -fx-border-color: -brisk-border; -fx-border-radius: 12;"
                 + " -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.2), 15, 0, 0, 5);");
 
-        javafx.scene.Scene scene = new javafx.scene.Scene(card, 600, 340);
+        javafx.scene.Scene scene = new javafx.scene.Scene(card, 540, 260);
         UiKit.applyTheme(scene);
         scene.setFill(javafx.scene.paint.Color.TRANSPARENT);
         dialog.setScene(scene);
         UiKit.escToClose(scene, dialog);
         UiKit.makeDraggable(dialog, header);
 
-        SafeLog.loginAttempt(AccountType.MICROSOFT);
-        // 两种登录方式共用的收尾：成功→存档并刷新，失败→提示（错误讯息不含 token）
+        // 成功→存档并刷新；失败→提示（错误讯息经过 Redactor，不含令牌/appid）
         java.util.function.Consumer<LoginResult> onDone = result -> Platform.runLater(() -> {
             dialog.close();
             if (result.success()) {
@@ -312,61 +298,40 @@ public final class AccountPage extends VBox implements MclPage {
                         result.errorMessage());
             }
         });
-        // 没有 client id 就不发任何请求：直接告诉玩家原因（等待审核）
-        String configuredId = context.settings().microsoftClientId() == null
-                ? "" : context.settings().microsoftClientId().trim();
-        if (configuredId.isBlank() && System.getProperty("mcl.dev.logincode") == null) {
+
+        // 每次登录都重新取值：改过设置页 / 换过环境变量都不用重启
+        String effectiveId = com.brisklauncher.mcl.util.MsClientId.resolve(
+                context.settings().microsoftClientId());
+        SafeLog.loginAttempt(AccountType.MICROSOFT);
+
+        // 没有可用的客户端 ID：不发任何请求，直接说明原因（开发构建 / 自己编译的版本）
+        if (effectiveId.isBlank()) {
             stateLabel.setText(I18n.t("account.microsoft.no_client_id"));
-            copyButton.setDisable(true);
-            openButton.setDisable(true);
-            browserButton.setDisable(true);
+            hintLabel.setText(I18n.t("account.microsoft.no_client_id_hint"));
             progress.setVisible(false);
-            clientIdHint.setText(I18n.t("account.microsoft.no_client_id_hint"));
+            progress.setManaged(false);
             settingsButton.setVisible(true);
             settingsButton.setManaged(true);
+            closeButton.setText(I18n.t("common.close"));
             UiKit.popIn(dialog, card);
             dialog.show();
             return;
         }
-        settingsButton.setVisible(false);
-        settingsButton.setManaged(false);
-        // 每次登录都重新读取设置，修改客户端 ID 后不用重启
-        // 开发期：假验证码（截图/回归验证用，不连网）
-        String devCode = System.getProperty("mcl.dev.logincode");
-        if (devCode != null && !devCode.isBlank()) {
-            userCodeLabel.setText(devCode.trim());
-            uriLabel.setText("https://www.microsoft.com/link");
-            codeRow.setVisible(true);
-            codeRow.setManaged(true);
-            pageRow.setVisible(true);
-            pageRow.setManaged(true);
-            stateLabel.setText(I18n.t("account.microsoft.waiting"));
-            UiKit.popIn(dialog, card);
-            dialog.show();
-            return;
-        }
-        MicrosoftAuthProvider microsoft = new MicrosoftAuthProvider(
-                context.settings().microsoftClientId());
-        browserButton.setOnAction(e -> {
-            // HMCL 风格：开浏览器 + localhost 回呼（PKCE + state，见 MicrosoftAuthProvider）
-            browserButton.setDisable(true);
-            codeRow.setVisible(false);
-            codeRow.setManaged(false);
-            pageRow.setVisible(false);
-            pageRow.setManaged(false);
-            clientIdHint.setText("");
-            stateLabel.setText(I18n.t("account.microsoft.browser_state"));
-            MicrosoftAuthProvider browser = new MicrosoftAuthProvider(
-                    context.settings().microsoftClientId());
-            browser.loginWithBrowser(
-                    state -> Platform.runLater(() -> stateLabel.setText(state)),
-                    onDone);
-        });
-        // P0-1：这个对话框**不再**在打开时就偷偷申请设备码（原本会无条件轮询 15 分钟）。
-        // 设备码登录请从帐号页的「登入」按钮触发（startDeviceCodeLogin），
-        // 这里只保留浏览器登录这一条明确的使用者操作。
+
         UiKit.popIn(dialog, card);
         dialog.show();
+
+        // P0-1：不在打开对话框时就偷偷发请求；只有「登录」是使用者的明确操作
+        MicrosoftAuthProvider browser = new MicrosoftAuthProvider(effectiveId);
+        browser.loginWithBrowser(
+                state -> Platform.runLater(() -> stateLabel.setText(state)),
+                url -> Platform.runLater(() -> {
+                    // URL 到手就把「手动打开登录页」亮出来（自动开浏览器失败时这就是唯一出路）
+                    authorizeUrl[0] = url;
+                    openPageButton.setVisible(true);
+                    openPageButton.setManaged(true);
+                }),
+                onDone);
     }
 
     // ---------- 离线 ----------
@@ -441,7 +406,7 @@ public final class AccountPage extends VBox implements MclPage {
                 java.util.Arrays.fill(password, '\0');
                 MCLDialog.error(getScene().getWindow(), I18n.t("account.third_party.login"),
                         I18n.t("account.third_party.bad_endpoint"));
-                endpointField.setStyle("-fx-border-color: #D9534F;");
+                endpointField.setStyle("-fx-border-color: -brisk-danger;");
                 return;
             }
             LoginResult result = yggdrasil.login(new LoginCredentials(

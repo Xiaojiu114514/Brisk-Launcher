@@ -1,0 +1,77 @@
+/* 夜色 / Night — 深色、低飽和、不刺眼（參考美西螈啟動器那種「暗而不亮」的觀感）。
+ *
+ * 這個主題**只改設計變數**：啟動器所有顏色都走 -brisk-*，所以不用一條條覆蓋選擇器。
+ * 想再加自己的規則也可以写在下面（同樣建議用 -brisk-* 當顏色）。
+ */
+
+.root {
+    /* 底色 / 表面 */
+    -brisk-bg: #14161D;
+    -brisk-bg-soft: #191C25;
+    -brisk-surface: #1E222C;
+    -brisk-surface-2: #262B37;
+    -brisk-surface-3: #2E3442;
+    -brisk-surface-hover: #2A3040;
+    -brisk-surface-selected: #333A4C;
+    -brisk-glass: rgba(24, 28, 38, 0.62);
+    -brisk-glass-strong: rgba(24, 28, 38, 0.84);
+    -brisk-overlay: rgba(24, 28, 38, 0.97);
+    -brisk-overlay-solid: #1E222C;
+    -brisk-scrim: rgba(0, 0, 0, 0.55);
+
+    /* 邊框 */
+    -brisk-border: #333A4A;
+    -brisk-border-soft: #2A303E;
+    -brisk-border-2: #3E4658;
+    -brisk-border-strong: #4A5468;
+
+    /* 文字 */
+    -brisk-text: #E4E8F0;
+    -brisk-text-body: #C9D0DC;
+    -brisk-text-dim: #A8B0C0;
+    -brisk-text-muted: #949CAE;
+    -brisk-text-faint: #7C8496;
+    -brisk-text-tag: #C9D0DC;
+
+    /* 主色（低飽和藍，不用霓虹綠） */
+    -brisk-accent: #7C9CFF;
+    -brisk-accent-2: #6B8AF0;
+    -brisk-accent-strong: #5C7AE0;
+    -brisk-accent-soft: #4C66C0;
+    -brisk-accent-deep: #8FB0FF;
+    -brisk-accent-border: #44507A;
+    -brisk-on-accent: #0F1420;
+
+    /* 狀態 */
+    -brisk-warn-text: #E0B080;
+    -brisk-warn-bg: #3A3226;
+    -brisk-warn-glass: rgba(58, 50, 38, 0.7);
+    -brisk-danger: #E57373;
+    -brisk-ok: #7BC98B;
+    -brisk-warning: #E0B080;
+
+    /* 陰影 / 頂欄漸層 */
+    -brisk-shadow: rgba(0, 0, 0, 0.35);
+    -brisk-shadow-strong: rgba(0, 0, 0, 0.5);
+    -brisk-accent-shadow: rgba(92, 122, 224, 0.3);
+    -brisk-topbar-from: #1A1E28;
+    -brisk-topbar-to: #14161D;
+}
+
+/* 夜裡看久一點：主按鈕不要自發光 */
+.primary-button {
+    -fx-effect: none;
+}
+
+/* 卡片用邊框代替陰影（深色底上陰影幾乎看不到，邊框更清楚） */
+.card {
+    -fx-effect: none;
+    -fx-border-width: 1;
+    -fx-border-radius: 14;
+}
+
+/* 選中的列表項再加一點辨識度 */
+.list-cell:selected,
+.list-cell:filled:selected:focused {
+    -fx-font-weight: bold;
+}

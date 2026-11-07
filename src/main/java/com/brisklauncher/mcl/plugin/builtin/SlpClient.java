@@ -44,7 +44,7 @@ public final class SlpClient {
     public static Response ping(String address, int timeoutMs) throws Exception {
         String raw = address == null ? "" : address.trim();
         if (raw.isEmpty()) {
-            throw new IllegalArgumentException("地址为空");
+            throw new IllegalArgumentException(com.brisklauncher.mcl.i18n.I18n.t("tools.slp.empty_address"));
         }
         String host = raw;
         int port = 25565;
@@ -89,7 +89,7 @@ public final class SlpClient {
             DataInputStream data = new DataInputStream(in);
             int length = readVarInt(data);
             if (length <= 0 || length > 4 * 1024 * 1024) {
-                throw new EOFException("服务器回应长度异常：" + length);
+                throw new EOFException(com.brisklauncher.mcl.i18n.I18n.t("tools.slp.bad_length", length));
             }
             byte[] payload = new byte[length];
             data.readFully(payload);
@@ -98,7 +98,7 @@ public final class SlpClient {
             ByteArrayInputStream buffer = new ByteArrayInputStream(payload);
             int packetId = readVarInt(buffer);
             if (packetId != 0) {
-                throw new EOFException("非预期的包 id：" + packetId);
+                throw new EOFException(com.brisklauncher.mcl.i18n.I18n.t("tools.slp.bad_packet", packetId));
             }
             return new Response(host, port, latency, readString(buffer));
         }
@@ -133,7 +133,7 @@ public final class SlpClient {
         while (true) {
             int read = in.read();
             if (read < 0) {
-                throw new EOFException("连接已关闭");
+                throw new EOFException(com.brisklauncher.mcl.i18n.I18n.t("tools.slp.closed"));
             }
             value |= (read & 0x7F) << position;
             if ((read & 0x80) == 0) {
@@ -141,7 +141,7 @@ public final class SlpClient {
             }
             position += 7;
             if (position >= 35) {
-                throw new EOFException("VarInt 过长");
+                throw new EOFException(com.brisklauncher.mcl.i18n.I18n.t("tools.slp.varint_too_long"));
             }
         }
     }
@@ -149,14 +149,14 @@ public final class SlpClient {
     private static String readString(InputStream in) throws java.io.IOException {
         int length = readVarInt(in);
         if (length < 0 || length > 4 * 1024 * 1024) {
-            throw new EOFException("字符串长度异常：" + length);
+            throw new EOFException(com.brisklauncher.mcl.i18n.I18n.t("tools.slp.bad_string", length));
         }
         byte[] bytes = new byte[length];
         int offset = 0;
         while (offset < length) {
             int read = in.read(bytes, offset, length - offset);
             if (read < 0) {
-                throw new EOFException("连接已关闭");
+                throw new EOFException(com.brisklauncher.mcl.i18n.I18n.t("tools.slp.closed"));
             }
             offset += read;
         }

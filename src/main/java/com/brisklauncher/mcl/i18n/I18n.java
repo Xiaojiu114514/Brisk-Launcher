@@ -170,12 +170,33 @@ public final class I18n {
                 default -> Locale.SIMPLIFIED_CHINESE;
             };
             bundle = load(currentLocale);
+        } else {
+            // 自訂語言包：缺鍵時回退到「最接近的內建語言」，而不是上一個選過的語言
+            currentLocale = closestBuiltin(tag);
+            bundle = load(currentLocale);
         }
         listeners.forEach(Runnable::run);
     }
 
-    public static void addListener(Runnable listener) {
+    /** 自訂語言包 id → 最接近的內建語言（{@code my_zh_TW} 會回退到繁中）。 */
+    private static Locale closestBuiltin(String tag) {
+        String lower = tag == null ? "" : tag.toLowerCase(Locale.ROOT);
+        if (lower.contains("hk") || lower.contains("hant-hk")) {
+            return Locale.forLanguageTag("zh-Hant-HK");
+        }
+        if (lower.contains("tw") || lower.contains("hant")) {
+            return Locale.TRADITIONAL_CHINESE;
+        }
+        if (lower.startsWith("en") || lower.contains("_en")) {
+            return Locale.US;
+        }
+        return Locale.SIMPLIFIED_CHINESE;
+    }
+
+    /** 註冊語言切換監聽；回傳的 Runnable 用來取消註冊（插件卸載時要用）。 */
+    public static Runnable addListener(Runnable listener) {
         listeners.add(listener);
+        return () -> listeners.remove(listener);
     }
 
     private static ResourceBundle load(Locale locale) {

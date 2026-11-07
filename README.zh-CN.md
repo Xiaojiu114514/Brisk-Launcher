@@ -8,13 +8,22 @@
 
 ## 功能
 
-- 原版 / Forge / NeoForge / Fabric 安装，加载器并入版本，默认版本隔离
-- 整合包导入导出，Mod / 资源包 / 光影 / 存档管理
-- 微软 / 离线 / 第三方账号，多语言界面，spark 报告与崩溃分析
-
+- 多游戏根与多实例，版本隔离目录，实例级设置（Java、内存、启动参数）。
+- Fabric / Forge / NeoForge 安装器、整合包导入导出。
+- **启动器插件**：把 jar 放进 `data/plugins/` 就会被加载（可新增页面、工具、调用插件 API）。
+- **第三方主题**：在 `data/themes/<id>/` 放 `theme.css`（可选 `theme.json` / `logo.png`）。切换即时生效，原生启动图也会跟着换色。
+- **更多语言**：在 `data/lang/<locale>/` 放 `messages.properties` 即可。
 ## 插件开发
 
-插件 API、`plugin.json` 格式、生命周期与打包说明见 **[插件开发指南 →](PLUGIN_DEV.md)**
+插件就是一个放在 `data\plugins\` 下的 jar，可以加工具面板、导航页、自己的语言包、自己的配置目录、
+给别的插件用的服务，甚至账号认证实现。API 参考、`plugin.json` 格式、生命周期、打包与可运行示例见
+**[插件开发指南 →](PLUGIN_DEV.md)** · [示例插件](examples/hello-plugin/)
+
+## 主题开发
+
+主题就是 `data\themes\` 下的 CSS 包，可选 `theme.json`（多语言名称、多份 CSS、背景图与铺法/压暗、
+设置页缩图）。启动器自带三个主题（`night`、`sakura`、`contrast`），切换即时生效。
+**[主题开发指南 →](THEME_DEV.md)** · [示例主题](examples/my-theme/)
 
 ## 环境要求
 
@@ -24,22 +33,27 @@
 ## 构建与运行
 
 ```bat
-set JAVA_HOME=C:\Program Files\Java\jdk-21
-mvn -o compile
-gradle installDist installLauncherScripts
-build\install\brisk-launcher\Brisk Launcher.vbs
+set GRADLE_USER_HOME=%CD%\.cache\gradle
+gradle bootExe
 ```
 
-需要看日志时用 `build\install\brisk-launcher\Brisk Launcher Debug.cmd`（保留控制台）。
+产物：`build\distributions\BriskLauncher.exe` —— 一个自包含的单文件（约 30 MB，jar 全部内嵌），首次启动会把 jar 释放到 `runtime/lib/` 再拉起 JVM。
 
+- 构建需要 JDK 21；生成的 exe 运行时也需要 Java 21，缺失时会自动下载到 `data/jre`。
+- 目录版（开发用）：`gradle installDist`，然后运行 `build\install\brisk-launcher\Brisk Launcher.vbs`。
+- 发版：GitHub Release **只上传** `BriskLauncher.exe`；内置更新器下载的也是这个 exe，退出后自动替换自己。
 ## 数据位置
+
+除了账号清单，所有运行期数据都在 exe 旁边（便携）：
 
 | 路径 | 内容 |
 |---|---|
-| `%LOCALAPPDATA%\BriskLauncher\` | 账号与会话、启动器设置（私密目录，仅当前用户可访问） |
-| `<启动器目录>\data\` | 缓存、日志、下载的 JDK、主题包、插件、`crash-rules.json` |
-| `versions/<实例名>/` | 每个实例一个文件夹（隔离的 mods / config / saves） |
+| `runtime/lib/` | 首次启动从 exe 里释放出来的 jar（自动复用、自动清理旧版本） |
+| `data/` | 启动器设置、主题、语言包、插件、日志、缓存 |
+| `minecraft/` | 内置游戏目录（`versions/<id>/`） |
+| `%LOCALAPPDATA%\BriskLauncher\` | `accounts.json` 与会话令牌（同一个 Windows 用户的所有启动器副本共用） |
 
+账号不在 `data/` 里，所以把 exe 换到别的目录运行也还是同一份账号。
 ## 许可证
 
 见 [LICENSE](LICENSE)。

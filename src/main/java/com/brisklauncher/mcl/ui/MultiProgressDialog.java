@@ -62,7 +62,7 @@ public final class MultiProgressDialog {
         dialog.setTitle(title);
 
         Label header = new Label(title);
-        header.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #14453F;");
+        header.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: -brisk-text;");
         Button hide = UiKit.closeButtonStyled();
         hide.getStyleClass().addAll("window-button", "window-close");
         final Thread[] workerRef = new Thread[1];
@@ -97,7 +97,7 @@ public final class MultiProgressDialog {
                 default -> I18n.t("install.phase.download");
             };
             phaseBadge.setText(text);
-            phaseBadge.setStyle("-fx-background-color: " + color + "; -fx-text-fill: #FFFFFF;"
+            phaseBadge.setStyle("-fx-background-color: " + color + "; -fx-text-fill: -brisk-on-accent;"
                     + " -fx-background-radius: 10; -fx-padding: 2 12 2 12;"
                     + " -fx-font-size: 12px; -fx-font-weight: bold;");
         };
@@ -160,8 +160,8 @@ public final class MultiProgressDialog {
         VBox root = new VBox(12, headerRow, statusLine, rows);
         root.setPadding(new Insets(16));
         root.setPrefWidth(560);
-        root.setStyle("-fx-background-color: #F4FCFA; -fx-background-radius: 12;"
-                + " -fx-border-color: #BFE9E2; -fx-border-radius: 12;");
+        root.setStyle("-fx-background-color: -brisk-bg; -fx-background-radius: 12;"
+                + " -fx-border-color: -brisk-border; -fx-border-radius: 12;");
 
         javafx.scene.Scene scene = new javafx.scene.Scene(root);
         UiKit.applyTheme(scene);
@@ -293,6 +293,8 @@ public final class MultiProgressDialog {
             case JAVA -> I18n.t("install.stage.java");
             case FINISHING -> I18n.t("install.stage.finishing");
             case DONE -> I18n.t("install.stage.done");
+            case UPDATE_DOWNLOAD -> I18n.t("update.stage.download");
+            case UPDATE_EXTRACT -> I18n.t("update.stage.extract");
         };
     }
 }

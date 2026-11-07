@@ -42,6 +42,9 @@ public final class SkinPreview3D extends StackPane {
      */
     private final PhongMaterial material = new PhongMaterial();
 
+    /** 瘦模型（Alex，3px 手臂）标记；由皮肤贴图判断。 */
+    private boolean slim;
+
     private final Group figure = new Group();
     private final Rotate yaw = new Rotate(0, Rotate.Y_AXIS);
     private final Rotate pitch = new Rotate(0, Rotate.X_AXIS);
@@ -64,15 +67,21 @@ public final class SkinPreview3D extends StackPane {
         setPickOnBounds(true);
 
         material.setDiffuseMap(UPSCALED_STEVE);
-        material.setSpecularColor(Color.rgb(40, 40, 40));
+        // 皮肤是哑光的：以前给 40,40,40 的高光会让脸/额头泛白，直接关掉高光
+        material.setSpecularColor(Color.rgb(0, 0, 0));
         // 默认让正面朝向摄像机（JavaFX 摄像机沿 +Z 看，模型正面也是 +Z）
         yaw.setAngle(180);
 
         buildFigure();
 
         Group root = new Group();
-        root.getChildren().addAll(new AmbientLight(Color.rgb(235, 225, 215)),
-                pointLight(-40, -50, -40), figure);
+        // 光照总量要压在 1.0 附近，超过 1 就会被压成纯白（以前环境光 235 + 点光 255 ≈ 2.0，所以一片泛白）。
+        // 参考 3d-Skin-Layers：环境光打底 + 一盏主光 + 一盏很弱的补光，没有高光。
+        root.getChildren().addAll(new AmbientLight(Color.rgb(138, 138, 145)),
+                pointLight(-40, -50, -40, Color.rgb(128, 126, 122)),
+                pointLight(45, -30, 45, Color.rgb(40, 40, 45)),
+                pointLight(-10, -45, 50, Color.rgb(30, 30, 34)),
+                figure);
         figure.getTransforms().addAll(yaw, pitch);
         figure.setTranslateY(-2);
 
@@ -104,8 +113,8 @@ public final class SkinPreview3D extends StackPane {
         });
     }
 
-    private PointLight pointLight(double x, double y, double z) {
-        PointLight light = new PointLight(Color.rgb(255, 245, 230));
+    private PointLight pointLight(double x, double y, double z, Color color) {
+        PointLight light = new PointLight(color);
         light.setTranslateX(x);
         light.setTranslateY(y);
         light.setTranslateZ(z);
@@ -113,35 +122,85 @@ public final class SkinPreview3D extends StackPane {
     }
 
     private void buildFigure() {
+        // 外层（帽子/外套/袖子/裤腿）：MC 的 3D 皮肤有两层，第二层比第一层大 0.5px。
+        // 参考 3D-Skin-Layers 的效果：内层实体 + 外层半透明叠加。
+        final double inflate = 0.5;
+
         MeshView head = box(8, 8, 8, new double[]{
                 8, 8, 8, 8, 24, 8, 8, 8, 16, 8, 8, 8, 0, 8, 8, 8,
                 8, 0, 8, 8, 16, 0, 8, 8});
+        MeshView hat = box(8 + inflate, 8 + inflate, 8 + inflate, new double[]{
+                40, 8, 8, 8, 56, 8, 8, 8, 48, 8, 8, 8, 32, 8, 8, 8,
+                40, 0, 8, 8, 48, 0, 8, 8});
+
         MeshView body = box(8, 12, 4, new double[]{
                 20, 20, 8, 12, 32, 20, 8, 12, 28, 20, 4, 12, 16, 20, 4, 12,
                 20, 16, 8, 4, 28, 16, 8, 4});
-        MeshView rightArm = box(4, 12, 4, new double[]{
-                44, 20, 4, 12, 52, 20, 4, 12, 48, 20, 4, 12, 40, 20, 4, 12,
-                44, 16, 4, 4, 48, 16, 4, 4});
-        MeshView leftArm = box(4, 12, 4, new double[]{
-                36, 52, 4, 12, 44, 52, 4, 12, 40, 52, 4, 12, 32, 52, 4, 12,
-                36, 48, 4, 4, 40, 48, 4, 4});
+        MeshView jacket = box(8 + inflate, 12 + inflate, 4 + inflate, new double[]{
+                20, 36, 8, 12, 32, 36, 8, 12, 28, 36, 4, 12, 16, 36, 4, 12,
+                20, 32, 8, 4, 28, 32, 8, 4});
+
+        double armW = slim ? 3 : 4;
+        MeshView rightArm = slim
+                ? box(3, 12, 4, new double[]{
+                        44, 20, 3, 12, 51, 20, 3, 12, 47, 20, 4, 12, 40, 20, 4, 12,
+                        44, 16, 3, 4, 47, 16, 3, 4})
+                : box(armW, 12, 4, new double[]{
+                        44, 20, 4, 12, 52, 20, 4, 12, 48, 20, 4, 12, 40, 20, 4, 12,
+                        44, 16, 4, 4, 48, 16, 4, 4});
+        MeshView rightSleeve = box(armW + inflate, 12 + inflate, 4 + inflate, new double[]{
+                44, 36, 4, 12, 52, 36, 4, 12, 48, 36, 4, 12, 40, 36, 4, 12,
+                44, 32, 4, 4, 48, 32, 4, 4});
+
+        MeshView leftArm = slim
+                ? box(3, 12, 4, new double[]{
+                        36, 52, 3, 12, 43, 52, 3, 12, 39, 52, 4, 12, 32, 52, 4, 12,
+                        36, 48, 3, 4, 39, 48, 3, 4})
+                : box(armW, 12, 4, new double[]{
+                        36, 52, 4, 12, 44, 52, 4, 12, 40, 52, 4, 12, 32, 52, 4, 12,
+                        36, 48, 4, 4, 40, 48, 4, 4});
+        MeshView leftSleeve = box(armW + inflate, 12 + inflate, 4 + inflate, new double[]{
+                52, 52, 4, 12, 60, 52, 4, 12, 56, 52, 4, 12, 48, 52, 4, 12,
+                52, 48, 4, 4, 56, 48, 4, 4});
+
         MeshView rightLeg = box(4, 12, 4, new double[]{
                 4, 20, 4, 12, 12, 20, 4, 12, 8, 20, 4, 12, 0, 20, 4, 12,
                 4, 16, 4, 4, 8, 16, 4, 4});
+        MeshView rightPant = box(4 + inflate, 12 + inflate, 4 + inflate, new double[]{
+                4, 36, 4, 12, 12, 36, 4, 12, 8, 36, 4, 12, 0, 36, 4, 12,
+                4, 32, 4, 4, 8, 32, 4, 4});
+
         MeshView leftLeg = box(4, 12, 4, new double[]{
                 20, 52, 4, 12, 28, 52, 4, 12, 24, 52, 4, 12, 16, 52, 4, 12,
                 20, 48, 4, 4, 24, 48, 4, 4});
+        MeshView leftPant = box(4 + inflate, 12 + inflate, 4 + inflate, new double[]{
+                4, 52, 4, 12, 12, 52, 4, 12, 8, 52, 4, 12, 0, 52, 4, 12,
+                4, 48, 4, 4, 8, 48, 4, 4});
 
         head.setTranslateY(-10);
+        hat.setTranslateY(-10);
         body.setTranslateY(0);
+        jacket.setTranslateY(0);
 
-        Group rightArmPivot = limbPivot(rightArm, 6, -6, armRight);
-        Group leftArmPivot = limbPivot(leftArm, -6, -6, armLeft);
-        Group rightLegPivot = limbPivot(rightLeg, 2, 6, legRight);
-        Group leftLegPivot = limbPivot(leftLeg, -2, 6, legLeft);
+        double armX = slim ? 5.5 : 6;   // 瘦模型手臂窄 0.5px，贴着身体
+        Group rightArmPivot = limbPivot(rightArm, armX, -6, armRight, rightSleeve);
+        Group leftArmPivot = limbPivot(leftArm, -armX, -6, armLeft, leftSleeve);
+        Group rightLegPivot = limbPivot(rightLeg, 2, 6, legRight, rightPant);
+        Group leftLegPivot = limbPivot(leftLeg, -2, 6, legLeft, leftPant);
 
-        figure.getChildren().addAll(head, body, rightArmPivot, leftArmPivot,
-                rightLegPivot, leftLegPivot);
+        figure.getChildren().addAll(head, hat, body, jacket,
+                rightArmPivot, leftArmPivot, rightLegPivot, leftLegPivot);
+    }
+
+    private static Group limbPivot(MeshView view, double x, double y, Rotate rotation,
+                                   MeshView overlay) {
+        view.setTranslateY(6);
+        overlay.setTranslateY(6);
+        Group pivot = new Group(view, overlay);
+        pivot.setTranslateX(x);
+        pivot.setTranslateY(y);
+        pivot.getTransforms().add(rotation);
+        return pivot;
     }
 
     private static Group limbPivot(MeshView view, double x, double y, Rotate rotation) {
@@ -215,10 +274,41 @@ public final class SkinPreview3D extends StackPane {
             usePlaceholder();
             return;
         }
+        boolean slimNow = isSlimSkin(file);
+        if (slimNow != slim) {
+            slim = slimNow;
+            figure.getChildren().clear();
+            buildFigure();
+        }
         material.setDiffuseMap(upscale(image, image.getWidth() < 96 ? 4 : 2));
     }
 
+    /**
+     * 判断是不是瘦模型（Alex，3px 手臂）。
+     *
+     * <p>64×64 皮肤里，宽模型第 4 列手臂像素是不透明的；瘦模型那一列留透明。
+     * 采样 (54,20) / (55,20) 两个位置，透明就按瘦模型处理（64×32 的老皮肤一律算宽模型）。
+     */
+    private static boolean isSlimSkin(java.nio.file.Path file) {
+        try {
+            java.awt.image.BufferedImage image = javax.imageio.ImageIO.read(file.toFile());
+            if (image == null || image.getWidth() < 64 || image.getHeight() < 64) {
+                return false;
+            }
+            int first = image.getRGB(54, 20) >>> 24;
+            int second = image.getRGB(55, 20) >>> 24;
+            return first == 0 || second == 0;
+        } catch (Exception error) {
+            return false;
+        }
+    }
+
     public void usePlaceholder() {
+        if (slim) {
+            slim = false;
+            figure.getChildren().clear();
+            buildFigure();
+        }
         material.setDiffuseMap(UPSCALED_STEVE);
     }
 

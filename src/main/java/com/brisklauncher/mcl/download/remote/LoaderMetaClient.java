@@ -210,11 +210,35 @@ public final class LoaderMetaClient {
         return null;
     }
 
+    /** 版本号比较：按数字段比，比不了按字符串。界面排序统一用它（新的在前）。 */
+    public static int compareVersionsDescending(String a, String b) {
+        String[] left = String.valueOf(a).split("[.\\-_+]");
+        String[] right = String.valueOf(b).split("[.\\-_+]");
+        int count = Math.max(left.length, right.length);
+        for (int index = 0; index < count; index++) {
+            String x = index < left.length ? left[index] : "0";
+            String y = index < right.length ? right[index] : "0";
+            if (x.matches("\\d+") && y.matches("\\d+")) {
+                int compared = Long.compare(Long.parseLong(x), Long.parseLong(y));
+                if (compared != 0) {
+                    return compared;
+                }
+            } else {
+                int compared = x.compareToIgnoreCase(y);
+                if (compared != 0) {
+                    return compared;
+                }
+            }
+        }
+        return 0;
+    }
+
     public URI forgeInstaller(String mcVersion, String forgeVersion) {
         String full = mcVersion + "-" + forgeVersion;
-        // 先给 BMCLAPI 镜像（国内可用），MirrorResolver 仍会把官方位址排成备援
-        return URI.create(BMCLAPI + "/maven/net/minecraftforge/forge/" + full
-                + "/forge-" + full + "-installer.jar");
+        // 这里必须回**官方**地址：MirrorResolver.resolve() 靠 host 认得出官方源，
+        // 才能拼出 [BMCLAPI, BMCLAPI 备用, 官方] 三个候选。以前这里写死镜像地址，
+        // resolve() 认不出它，候选就只剩镜像一个 —— 镜像缺件/抽风时直接失败，没有回退。
+        return URI.create(FORGE_MAVEN + "/" + full + "/forge-" + full + "-installer.jar");
     }
 
     // ---------- NeoForge ----------
@@ -239,7 +263,10 @@ public final class LoaderMetaClient {
     }
 
     public URI neoforgeInstaller(String neoforgeVersion) {
-        return URI.create(BMCLAPI + "/maven/net/neoforged/neoforge/" + neoforgeVersion
+        // 同上：回官方地址，镜像由 MirrorResolver 排到前面并保留官方兜底。
+        // maven.neoforged.net 在国内多半连不上，但它是「最后一个候选」，
+        // 镜像两个域名都失败时才有机会、不影响正常路径。
+        return URI.create(NEOFORGE_MAVEN + "/" + neoforgeVersion
                 + "/neoforge-" + neoforgeVersion + "-installer.jar");
     }
 
@@ -264,7 +291,15 @@ public final class LoaderMetaClient {
         if (parts.length < 2) {
             return all;
         }
-        String prefix = parts[1] + "." + (parts.length > 2 ? parts[2] : "0") + ".";
+        String prefix;
+        if (mcVersion.startsWith("1.")) {
+            // 旧编号：1.21.1 → NeoForge 21.1.x；1.21 → 21.0.x
+            prefix = parts[1] + "." + (parts.length > 2 ? parts[2] : "0") + ".";
+        } else {
+            // 新编号（2026 起，例如 26.3）：NeoForge 的版本号直接跟着游戏版本，
+            // 26.3 → 26.3.x。以前这里固定按「1.x」解析，26.3 被算成 3.0. → 永远查不到版本。
+            prefix = parts[0] + "." + parts[1] + ".";
+        }
         return filterByPrefix(all, prefix);
     }
 

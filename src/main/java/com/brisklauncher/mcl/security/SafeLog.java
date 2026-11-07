@@ -41,8 +41,8 @@ public final class SafeLog {
 
     /** 只做拦截，不做打码输出。 */
     private static final Pattern CREDENTIAL_LIKE = Pattern.compile(
-            "(?i)(access[_-]?token|refresh[_-]?token|client[_-]?secret|" +
-            "authorization\\s*[:=]|bearer\\s+\\S{8,}|password\\s*[:=])");
+            "(?i)(access[_-]?token|refresh[_-]?token|client[_-]?secret|client[_-]?id|appid|" +
+            "device[_-]?code|authorization\\s*[:=]|bearer\\s+\\S{8,}|password\\s*[:=])");
 
     private SafeLog() {
     }

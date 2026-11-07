@@ -126,6 +126,17 @@ public final class VersionPage extends VBox implements MclPage {
         open.setTooltip(new Tooltip(I18n.t("version.open_folder")));
         open.setOnAction(e -> openFolder(root.path()));
 
+        Button rename = new Button("✏");
+        rename.getStyleClass().add("icon-button");
+        rename.setTooltip(new Tooltip(I18n.t("version.root_rename")));
+        rename.setOnAction(e -> MCLDialog.prompt(getScene().getWindow(),
+                I18n.t("version.root_rename"), I18n.t("version.root_rename_hint"),
+                root.displayName(), input -> null,
+                input -> {
+                    context.gameRepository().renameRoot(root, input);
+                    reload();
+                }));
+
         Button remove = new Button("🗑");
         remove.getStyleClass().add("icon-button");
         remove.setTooltip(new Tooltip(I18n.t("version.remove_root")));
@@ -136,7 +147,7 @@ public final class VersionPage extends VBox implements MclPage {
                     reload();
                 }));
 
-        HBox header = new HBox(8, arrow, rootIcon, titleBox, pickIcon, open, remove);
+        HBox header = new HBox(8, arrow, rootIcon, titleBox, pickIcon, rename, open, remove);
         header.setAlignment(Pos.CENTER_LEFT);
         header.setPadding(new Insets(8, 10, 8, 10));
         header.getStyleClass().add("tree-root-header");

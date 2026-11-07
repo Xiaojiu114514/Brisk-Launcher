@@ -52,7 +52,7 @@ public final class ModUpgradeDialog {
         dialog.setTitle(I18n.t("modupgrade.title"));
 
         Label title = new Label("⬆ " + I18n.t("modupgrade.title") + " · " + source.id());
-        title.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #14453F;");
+        title.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: -brisk-text;");
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
         Button close = UiKit.closeButtonStyled();
@@ -363,8 +363,8 @@ public final class ModUpgradeDialog {
         VBox root = new VBox(10, header, sourceInfo, targetRow, targetInstanceRow, analyseRow,
                 list, footer);
         root.setPadding(new Insets(16));
-        root.setStyle("-fx-background-color: #F4FCFA; -fx-background-radius: 12;"
-                + " -fx-border-color: #BFE9E2; -fx-border-radius: 12;"
+        root.setStyle("-fx-background-color: -brisk-bg; -fx-background-radius: 12;"
+                + " -fx-border-color: -brisk-border; -fx-border-radius: 12;"
                 + " -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.2), 15, 0, 0, 5);");
 
         Scene scene = new Scene(root, 820, 660);

@@ -53,7 +53,7 @@ public final class CrashTimelineView {
         // 左：时:分:秒 + 相对秒数
         Label clock = new Label(CLOCK.format(Instant.ofEpochMilli(event.epochMillis())
                 .atZone(ZoneId.systemDefault())));
-        clock.setStyle("-fx-font-size: 11px; -fx-text-fill: #2E6B64;");
+        clock.setStyle("-fx-font-size: 11px; -fx-text-fill: -brisk-text-tag;");
         Label relative = new Label(String.format(Locale.ROOT, "+%.2fs",
                 (event.epochMillis() - base) / 1000.0));
         relative.getStyleClass().add("cat-hint");
@@ -76,7 +76,7 @@ public final class CrashTimelineView {
         line.setPrefWidth(2);
         line.setMinWidth(2);
         line.setMaxWidth(2);
-        line.setStyle("-fx-background-color: #BFE9E2;");
+        line.setStyle("-fx-background-color: -brisk-border;");
         if (last) {
             line.setVisible(false);
         }
@@ -176,7 +176,7 @@ public final class CrashTimelineView {
         line.setMinWidth(2);
         line.setMaxWidth(2);
         line.setPrefHeight(22);
-        line.setStyle("-fx-background-color: #CBE9E4;");
+        line.setStyle("-fx-background-color: -brisk-border-soft;");
         VBox marker = new VBox(0, line);
         marker.setAlignment(Pos.TOP_CENTER);
         marker.setMinWidth(16);

@@ -2,8 +2,9 @@ package com.brisklauncher.mcl.ui;
 
 import com.brisklauncher.mcl.MclContext;
 import com.brisklauncher.mcl.i18n.I18n;
-import com.brisklauncher.mcl.plugin.LauncherPlugin;
 import com.brisklauncher.mcl.plugin.PluginManager;
+import com.brisklauncher.mcl.plugin.api.LauncherPage;
+import com.brisklauncher.mcl.plugin.api.PluginApi;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
@@ -27,7 +28,11 @@ import java.util.Map;
  * 工具页：插件中心。
  *
  * <p>左边是插件列表（内建 + {@code data/plugins/*.jar}），右边是选中插件的面板。
- * 面板按 id 快取，切来切去不会重建；页面被丢弃时统一 {@link LauncherPlugin#dispose()}。
+ * 面板按 id 快取，切来切去不会重建；页面被丢弃、使用者按「刷新」、停用/移除插件时
+ * 统一 {@link com.brisklauncher.mcl.plugin.api.LauncherPlugin#onUnload()}。
+ *
+ * <p>插件只在启动时扫一次（{@link PluginManager#load()}），本页切来切去<b>不会</b>重扫 jar，
+ * 所以不会再出现「每次进工具页都重算 SHA-256」的卡顿。
  */
 public final class ToolsPage extends VBox implements MclPage {
 
@@ -39,7 +44,7 @@ public final class ToolsPage extends VBox implements MclPage {
     private final Map<String, Node> panels = new HashMap<>();
     private final CheckBox enabledBox = new CheckBox(I18n.t("tools.enabled"));
     private final Button removeButton = new Button(I18n.t("tools.remove"));
-    private String currentId;
+    private final Runnable unloadHook = this::disposePanels;
 
     public ToolsPage(MclContext context) {
         this.context = context;
@@ -53,18 +58,21 @@ public final class ToolsPage extends VBox implements MclPage {
         importPlugin.setOnAction(e -> importPlugin());
         Button openDir = new Button(I18n.t("tools.open_dir"));
         openDir.setOnAction(e -> DesktopActions.openFolder(plugins.dir()));
+        Button openData = new Button(I18n.t("tools.open_data"));
+        openData.setOnAction(e -> DesktopActions.openFolder(
+                com.brisklauncher.mcl.AppPaths.pluginDataRoot()));
         Button refresh = new Button(I18n.t("common.refresh"));
         refresh.setOnAction(e -> {
+            disposePanels();
             plugins.reload();
-            panels.clear();
             reload();
         });
         status.getStyleClass().add("cat-hint");
-        HBox toolbar = new HBox(8, importPlugin, openDir, refresh, status);
+        HBox toolbar = new HBox(8, importPlugin, openDir, openData, refresh, status);
         toolbar.setAlignment(Pos.CENTER_LEFT);
 
         list.setCellFactory(view -> new PluginCell());
-        list.setPrefWidth(300);
+        list.setPrefWidth(320);
         list.setMinWidth(240);
         list.getSelectionModel().selectedItemProperty().addListener(
                 (obs, was, now) -> select(now));
@@ -75,9 +83,15 @@ public final class ToolsPage extends VBox implements MclPage {
             if (entry == null || entry.failed()) {
                 return;
             }
-            plugins.setEnabled(entry.id(), Boolean.TRUE.equals(now));
-            list.refresh();
-            select(entry);
+            boolean enabled = Boolean.TRUE.equals(now);
+            if (enabled == plugins.isEnabled(entry.id())) {
+                return;
+            }
+            // 真的卸载 / 重新载入，而不是只把面板藏起来
+            disposePanels();
+            plugins.setEnabled(entry.id(), enabled);
+            plugins.reload();
+            reload();
         });
         removeButton.setOnAction(e -> {
             PluginManager.Entry entry = list.getSelectionModel().getSelectedItem();
@@ -86,7 +100,7 @@ public final class ToolsPage extends VBox implements MclPage {
             }
             MCLDialog.confirm(getScene().getWindow(), I18n.t("tools.remove"),
                     I18n.t("tools.remove_confirm", entry.name()), () -> {
-                        panels.remove(entry.id());
+                        disposePanels();
                         plugins.remove(entry);
                         reload();
                     });
@@ -97,7 +111,7 @@ public final class ToolsPage extends VBox implements MclPage {
         VBox left = new VBox(8, UiKit.title(I18n.t("tools.plugins")), list, switches);
         HBox.setHgrow(list, Priority.ALWAYS);
         VBox.setVgrow(list, Priority.ALWAYS);
-        left.setMinWidth(250);
+        left.setMinWidth(260);
 
         content.getStyleClass().add("card");
         content.setPadding(new Insets(14));
@@ -115,19 +129,21 @@ public final class ToolsPage extends VBox implements MclPage {
                 UiKit.catHint(I18n.t("tools.subtitle")),
                 riskNote,
                 toolbar, body);
+        // 插件卸载（刷新 / 停用 / 移除）前先把面板收干净，否则插件资源不会释放
+        plugins.addBeforeUnloadListener(unloadHook);
         reload();
     }
 
     @Override
     public void onShown() {
-        plugins.reload();
-        panels.clear();
+        // 插件实例在启动时已载入，这里只重建列表（不重扫 jar、不重算摘要）
         reload();
     }
 
     @Override
     public void onReleased() {
         disposePanels();
+        plugins.removeBeforeUnloadListener(unloadHook);
         list.setItems(javafx.collections.FXCollections.observableArrayList());
     }
 
@@ -136,7 +152,7 @@ public final class ToolsPage extends VBox implements MclPage {
             PluginManager.Entry descriptor = plugins.find(entry.getKey());
             if (descriptor != null && descriptor.plugin() != null) {
                 try {
-                    descriptor.plugin().dispose();
+                    descriptor.plugin().onUnload();
                 } catch (Exception ignored) {
                     // 插件自己的清理失败不影响页面
                 }
@@ -146,24 +162,34 @@ public final class ToolsPage extends VBox implements MclPage {
     }
 
     private void reload() {
+        // 记住当前选中的插件 id：刷新 / 停用 / 导入之后不要把使用者甩回第一项
+        PluginManager.Entry previous = list.getSelectionModel().getSelectedItem();
         var entries = plugins.entries();
         list.setItems(javafx.collections.FXCollections.observableArrayList(entries));
         status.setText(I18n.t("tools.count", entries.stream().filter(entry -> !entry.failed()).count(),
                 entries.stream().filter(PluginManager.Entry::failed).count()));
-        if (!entries.isEmpty()) {
-            // 开发期：指定要打开的插件（截图/回归验证用）
-            String devTool = System.getProperty("mcl.dev.tool");
-            if (devTool != null && !devTool.isBlank()) {
-                list.getItems().stream()
-                        .filter(entry -> devTool.equals(entry.id()))
-                        .findFirst()
-                        .ifPresentOrElse(entry -> list.getSelectionModel().select(entry),
-                                () -> list.getSelectionModel().selectFirst());
-            } else {
-                list.getSelectionModel().selectFirst();
-            }
-        } else {
+        if (entries.isEmpty()) {
             content.getChildren().setAll(UiKit.catHint(I18n.t("tools.empty")));
+            return;
+        }
+        // 开发期：指定要打开的插件（截图/回归验证用）
+        String devTool = System.getProperty("mcl.dev.tool");
+        if (devTool != null && !devTool.isBlank()) {
+            list.getItems().stream()
+                    .filter(entry -> devTool.equals(entry.id()))
+                    .findFirst()
+                    .ifPresentOrElse(entry -> list.getSelectionModel().select(entry),
+                            () -> list.getSelectionModel().selectFirst());
+            return;
+        }
+        if (previous != null) {
+            list.getItems().stream()
+                    .filter(entry -> entry.id().equals(previous.id()))
+                    .findFirst()
+                    .ifPresentOrElse(entry -> list.getSelectionModel().select(entry),
+                            () -> list.getSelectionModel().selectFirst());
+        } else {
+            list.getSelectionModel().selectFirst();
         }
     }
 
@@ -171,10 +197,9 @@ public final class ToolsPage extends VBox implements MclPage {
         if (entry == null) {
             return;
         }
-        currentId = entry.id();
         enabledBox.setSelected(plugins.isEnabled(entry.id()));
         enabledBox.setDisable(entry.failed());
-        removeButton.setDisable(entry.builtin());
+        removeButton.setDisable(entry.builtin() || entry.failed());
         if (entry.failed()) {
             content.getChildren().setAll(new VBox(8,
                     new Label("⚠ " + entry.name()),
@@ -188,13 +213,36 @@ public final class ToolsPage extends VBox implements MclPage {
                     UiKit.catHint(I18n.t("tools.disabled_hint"))));
             return;
         }
+        if (!entry.hasPanel()) {
+            // 只贡献导航页的插件：没有工具面板，给他看这个插件提供了什么
+            VBox box = new VBox(8, UiKit.title(entry.name()),
+                    UiKit.catHint(I18n.t("tools.no_panel")));
+            if (!entry.pages().isEmpty()) {
+                StringBuilder titles = new StringBuilder();
+                for (LauncherPage page : entry.pages()) {
+                    if (titles.length() > 0) {
+                        titles.append(" · ");
+                    }
+                    titles.append(page.icon().isBlank() ? "" : page.icon() + " ").append(page.title());
+                }
+                box.getChildren().add(UiKit.catHint(I18n.t("tools.pages", titles.toString())));
+            }
+            box.getChildren().add(UiKit.catHint(I18n.t("tools.plugin_meta",
+                    entry.version().isBlank() ? "-" : entry.version(),
+                    entry.author().isBlank() ? "-" : entry.author(),
+                    PluginApi.VERSION)));
+            content.getChildren().setAll(box);
+            return;
+        }
         Node panel = panels.get(entry.id());
         if (panel == null) {
             try {
-                panel = entry.plugin().createPanel(plugins.host());
+                panel = entry.plugin().createPanel(entry.context());
             } catch (Throwable error) {
-                panel = new VBox(8, new Label("⚠ " + entry.name()),
-                        UiKit.catHint(String.valueOf(error)));
+                panel = errorPane(entry, error);
+            }
+            if (panel == null) {
+                panel = UiKit.catHint(I18n.t("tools.no_panel"));
             }
             if (panel instanceof ScrollPane scroll) {
                 scroll.setFitToWidth(true);
@@ -203,6 +251,11 @@ public final class ToolsPage extends VBox implements MclPage {
             panels.put(entry.id(), panel);
         }
         content.getChildren().setAll(panel);
+    }
+
+    private Node errorPane(PluginManager.Entry entry, Throwable error) {
+        return new VBox(8, new Label("⚠ " + entry.name()),
+                UiKit.catHint(String.valueOf(error)));
     }
 
     private void importPlugin() {
@@ -214,8 +267,8 @@ public final class ToolsPage extends VBox implements MclPage {
             return;
         }
         try {
+            disposePanels();
             plugins.install(file.toPath());
-            panels.clear();
             reload();
             MCLDialog.info(getScene().getWindow(), I18n.t("tools.import"),
                     I18n.t("tools.imported", file.getName()));
@@ -225,13 +278,14 @@ public final class ToolsPage extends VBox implements MclPage {
         }
     }
 
-    /** 列表單元：圖示 + 名稱 + 說明 + 來源標籤。 */
+    /** 列表单元：图标 + 名称 + 说明 + 来源标签；说明被截断时用 tooltip 显示全文。 */
     private final class PluginCell extends ListCell<PluginManager.Entry> {
         private final Label icon = new Label();
         private final Label name = new Label();
         private final Label desc = new Label();
         private final Label badge = new Label();
         private final HBox row;
+        private final javafx.scene.control.Tooltip tip = new javafx.scene.control.Tooltip();
 
         private PluginCell() {
             icon.setStyle("-fx-font-size: 20px;");
@@ -239,7 +293,7 @@ public final class ToolsPage extends VBox implements MclPage {
             icon.setMinWidth(javafx.scene.layout.Region.USE_PREF_SIZE);
             name.getStyleClass().add("entry-id");
             desc.getStyleClass().add("cat-hint");
-            desc.setMaxWidth(180);
+            desc.setMaxWidth(200);
             badge.getStyleClass().add("tag");
             badge.setMinWidth(javafx.scene.layout.Region.USE_PREF_SIZE);
             VBox text = new VBox(1, name, desc);
@@ -247,6 +301,11 @@ public final class ToolsPage extends VBox implements MclPage {
             row = new HBox(8, icon, text, badge);
             row.setAlignment(Pos.CENTER_LEFT);
             setPrefWidth(0);
+            // 插件说明经常很长，卡片放不下：整段放进 tooltip，悬停即可看全
+            tip.setWrapText(true);
+            tip.setMaxWidth(460);
+            tip.setShowDelay(javafx.util.Duration.millis(350));
+            tip.setHideDelay(javafx.util.Duration.millis(80));
         }
 
         @Override
@@ -254,11 +313,17 @@ public final class ToolsPage extends VBox implements MclPage {
             super.updateItem(entry, empty);
             if (empty || entry == null) {
                 setGraphic(null);
+                setTooltip(null);
                 return;
             }
             icon.setText(entry.icon());
             name.setText(entry.name());
-            desc.setText(entry.description());
+            String description = entry.description();
+            if ((description == null || description.isBlank()) && !entry.pages().isEmpty()) {
+                description = I18n.t("tools.page_count", entry.pages().size());
+            }
+            desc.setText(description);
+            setTooltip(tooltipFor(entry, description));
             if (entry.failed()) {
                 badge.setText("⚠");
             } else if (entry.builtin()) {
@@ -268,6 +333,24 @@ public final class ToolsPage extends VBox implements MclPage {
             }
             setOpacity(plugins.isEnabled(entry.id()) || entry.failed() ? 1 : 0.5);
             setGraphic(row);
+        }
+
+        /** 悬停提示：失败显示原因，否则显示完整说明（有版本/作者就补一行）。 */
+        private javafx.scene.control.Tooltip tooltipFor(PluginManager.Entry entry, String description) {
+            if (entry.failed()) {
+                tip.setText(entry.name() + "\n" + entry.error());
+                return tip;
+            }
+            StringBuilder text = new StringBuilder(
+                    description == null || description.isBlank() ? entry.name() : description);
+            if (!entry.version().isBlank() || !entry.author().isBlank()) {
+                text.append('\n').append(I18n.t("tools.plugin_meta",
+                        entry.version().isBlank() ? "-" : entry.version(),
+                        entry.author().isBlank() ? "-" : entry.author(),
+                        PluginApi.VERSION));
+            }
+            tip.setText(text.toString());
+            return tip;
         }
     }
 }

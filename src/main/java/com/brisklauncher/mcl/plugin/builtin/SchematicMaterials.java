@@ -59,7 +59,7 @@ final class SchematicMaterials {
         if (map.containsKey("Blocks")) {
             return parseClassic(map);
         }
-        throw new IllegalArgumentException("认不出这个投影档案格式（不是 litematic / schem / schematic / nbt）");
+        throw new IllegalArgumentException(com.brisklauncher.mcl.i18n.I18n.t("tools.schem.unknown_format"));
     }
 
     // ---------- 原版结构方块 ----------
@@ -89,8 +89,8 @@ final class SchematicMaterials {
             total++;
             materials.merge(blockName, 1, Integer::sum);
         }
-        return new Result("NBT 结构", width, height, length, total, sorted(materials),
-                "原版结构方块格式，材料名称直接来自 palette");
+        return new Result(com.brisklauncher.mcl.i18n.I18n.t("tools.schem.kind_vanilla"), width, height, length, total, sorted(materials),
+                com.brisklauncher.mcl.i18n.I18n.t("tools.schem.note_vanilla"));
     }
 
     // ---------- Litematica ----------
@@ -98,7 +98,7 @@ final class SchematicMaterials {
     private static Result parseLitematic(Map<String, Object> map, String fileName) {
         Map<String, Object> regions = Nbt.compound(map.get("Regions"));
         if (regions.isEmpty()) {
-            throw new IllegalArgumentException("litematic 里没有任何 region");
+            throw new IllegalArgumentException(com.brisklauncher.mcl.i18n.I18n.t("tools.schem.no_region"));
         }
         Map<String, Integer> materials = new LinkedHashMap<>();
         int width = 0;
@@ -141,12 +141,12 @@ final class SchematicMaterials {
             total += regionTotal;
             decodedRegions++;
         }
-        String note = "共 " + regions.size() + " 个 region，成功解码 " + decodedRegions + " 个";
+        String note = com.brisklauncher.mcl.i18n.I18n.t("tools.schem.note_regions", regions.size(), decodedRegions);
         if (decodedRegions < regions.size()) {
-            note += "（其余 region 缺少方块资料）";
+            note += com.brisklauncher.mcl.i18n.I18n.t("tools.schem.note_missing");
         }
         if (total == 0) {
-            note += "；没有统计到方块，可能是位打包格式不同，请回报这个档案";
+            note += com.brisklauncher.mcl.i18n.I18n.t("tools.schem.note_no_blocks");
         }
         return new Result("Litematica（" + fileName + "）", width, height, length, total,
                 sorted(materials), note);
@@ -180,7 +180,7 @@ final class SchematicMaterials {
         int height = Nbt.intValue(map.get("Height"), 0);
         int length = Nbt.intValue(map.get("Length"), 0);
         return countByPalette("Sponge schem", width, height, length, palette, indices,
-                "WorldEdit / Sponge 格式（varint 方块资料）");
+                com.brisklauncher.mcl.i18n.I18n.t("tools.schem.kind_worldedit"));
     }
 
     private static Result parseSpongeV3(Map<String, Object> map) {
@@ -191,7 +191,7 @@ final class SchematicMaterials {
         int height = Nbt.intValue(map.get("Height"), 0);
         int length = Nbt.intValue(map.get("Length"), 0);
         return countByPalette("Sponge schem v3", width, height, length, palette, indices,
-                "Sponge v3 格式（Blocks.Palette + Blocks.Data）");
+                com.brisklauncher.mcl.i18n.I18n.t("tools.schem.kind_sponge3"));
     }
 
     private static Map<String, Integer> readSpongePalette(Map<String, Object> paletteMap) {
@@ -245,7 +245,7 @@ final class SchematicMaterials {
             total++;
             materials.merge(classicName(id), 1, Integer::sum);
         }
-        String note = "MCEdit 老格式：只有数字 id，名称来自内建对照表（未收录的显示为 unknown:<id>）";
+        String note = com.brisklauncher.mcl.i18n.I18n.t("tools.schem.note_mcedit");
         return new Result("MCEdit schematic", width, height, length, total, sorted(materials), note);
     }
 

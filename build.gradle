@@ -19,7 +19,7 @@ plugins {
 }
 
 group = 'com.brisklauncher'
-version = '1.0.0'
+version = '1.1.0'
 
 java {
     toolchain {
@@ -172,6 +172,8 @@ tasks.register('jpackage', Exec) {
         }
         args += ['--java-options', '-Djavafx.cachedir=data/native/javafx']
         args += ['--java-options', '-Djna.tmpdir=data/native/jna']
+        // 原生啟動圖（JVM 級）：在 JavaFX 起來之前就先顯示，jpackage 用 $ROOTDIR 指到 app image 根目錄
+        args += ['--java-options', '-splash:$ROOTDIR/splash.gif']
         launcherJvmArgs.each { args += ['--java-options', it] }
         commandLine args
     }
@@ -212,36 +214,7 @@ tasks.register('selftest', JavaExec) {
 //  濞夈劍鍓伴敍姝﹏stallDist 娑撳秷鍤滅敮?JRE閿涘瞼娲伴弽鍥ㄦ簚閸ｃ劑娓剁憰浣筋棅 Java 21閵?
 // ============================================================
 // ============================================================
-//  閸楁洘鏋冩禒?exe閿涙nstallDist 娴溠呭⒖ + launcher.cmd閿涘牆鎯?Java 21 濡偓濞?閼奉亜濮╃€瑰顥婇敍?
-//    gradle bundleExe  閳?build\distributions\Brisk-Launcher.exe
-//  娴兼ê鍘涢悽?7-Zip SFX閿涙稒澹樻稉宥呭煂 7z 鐏忚鲸褰佺粈鐑樻暭閻?installDist 閸掑棗褰傞妴?
 // ============================================================
-tasks.register('bundleExe') {
-    group = 'distribution'
-    description = 'Pack installDist + start.vbs/launcher.cmd into one self-extracting exe'
-    dependsOn tasks.named('installDist')
-    outputs.upToDateWhen { false }
-    doLast {
-        def sevenZip = file('C:/Program Files/7-Zip/7z.exe')
-        def sfxModule = file('C:/Program Files/7-Zip/7z.sfx')
-        if (!sevenZip.isFile() || !sfxModule.isFile()) { throw new GradleException('7-Zip not found') }
-        def staging = layout.buildDirectory.dir('bundle').get().asFile
-        def outDir = layout.buildDirectory.dir('distributions').get().asFile
-        delete staging
-        def appDir = new File(staging, 'Brisk Launcher')
-        appDir.mkdirs()
-        copy { from layout.buildDirectory.dir('install/brisk-launcher'); into appDir }
-        new File(staging, 'config.txt').setText(';!@Install@!UTF-8!' + (char)13 + (char)10 + 'Title="Brisk Launcher"' + (char)13 + (char)10 + 'RunProgram="Brisk Launcher\\Brisk Launcher.exe"' + (char)13 + (char)10 + 'GUIMode="1"' + (char)13 + (char)10 + ';!@InstallEnd@!' + (char)13 + (char)10, 'UTF-8')
-        outDir.mkdirs()
-        def output = new File(outDir, 'Brisk-Launcher.exe')
-        delete output
-        exec {
-            workingDir staging
-            commandLine sevenZip.absolutePath, 'a', '-t7z', '-mx=9', '-sfx' + sfxModule.absolutePath, output.absolutePath, 'config.txt', 'Brisk Launcher'
-        }
-        logger.lifecycle('exe: ' + output.absolutePath + ' ' + (output.length() / 1048576.0).round(1) + ' MB')
-    }
-}
 tasks.named('installDist') {
     outputs.upToDateWhen { false }
     // 這個目錄同時是「開發期實際運行」的目錄，gradle 預設會把它同步成只剩發行內容：
@@ -256,6 +229,77 @@ tasks.named('installDist') {
             from layout.projectDirectory.dir('src/dist')
             into layout.buildDirectory.dir('install/brisk-launcher')
         }
+    }
+}
+
+// ============================================================
+//  原生啟動器（單 exe，像 HMCL 那樣雙擊就跑）
+//    gradle bootExe  →  build/distributions/BriskLauncher.exe
+//
+//  做法：用系統自帶的 csc.exe（.NET Framework 4.x）把 tools/bootstrapper/BriskBoot.cs
+//  編成 winexe，並把 lib/*.jar 與 splash.gif 當「內嵌資源」塞進去。
+//  執行時只把 jar 釋放到 %LOCALAPPDATA%\BriskLauncher\runtime\<bundleId>\lib\（JVM 只認磁碟上的 jar），
+//  data/ 與 minecraft/ 都留在 exe 同級。
+// ============================================================
+tasks.register('bootExe') {
+    group = 'distribution'
+    description = '以原生 exe 內嵌 jar 的方式打包（單文件發行）'
+    dependsOn tasks.named('jar')
+
+    def csc = file('C:/Windows/Microsoft.NET/Framework64/v4.0.30319/csc.exe')
+    def source = file('tools/bootstrapper/BriskBoot.cs')
+    def icon = file('src/main/resources/icon.ico')
+    def splash = file('src/dist/splash.gif')
+    def outDir = layout.buildDirectory.dir('distributions')
+    def buildDir = layout.buildDirectory.dir('boot')
+    def exeName = 'BriskLauncher.exe'
+    def jarFiles = configurations.runtimeClasspath
+    def appVersion = project.version.toString()
+
+    inputs.files(jarFiles)
+    // 自己那份 jar 也要算输入，否则改了 Java 代码 bootExe 还是 UP-TO-DATE
+    inputs.files(tasks.named('jar'))
+    inputs.file(source)
+    inputs.file(splash)
+    inputs.file(icon)
+    outputs.file(outDir.map { it.file(exeName) })
+
+    doLast {
+        if (!csc.isFile()) {
+            throw new GradleException('找不到 csc.exe（需要 .NET Framework 4.x）：' + csc)
+        }
+        def work = buildDir.get().asFile
+        work.mkdirs()
+        // bundleId 每次构建都变 → exe 升级后自动换到新的 runtime 缓存目录
+        def idFile = new File(work, 'BundleInfo.cs')
+        idFile.setText('internal static class BundleInfo { internal const string Id = "'
+                + appVersion + '-' + System.currentTimeMillis() + '"; }\n', 'UTF-8')
+
+        def target = new File(outDir.get().asFile, exeName)
+        target.parentFile.mkdirs()
+        def arguments = ['/nologo', '/target:winexe', '/platform:anycpu', '/optimize+', '/codepage:65001',
+                         '/win32icon:' + icon.absolutePath,
+                         '/out:' + target.absolutePath,
+                         '/r:System.Windows.Forms.dll',
+                         source.absolutePath,
+                         idFile.absolutePath]
+        // 依赖 jar（排除目录型 classpath，例如 build/classes）
+        def embedded = jarFiles.files.findAll { it.isFile() && it.name.toLowerCase().endsWith('.jar') }
+        // 自己这一份 jar 要单独塞：runtimeClasspath 在构建期解析到的是 classes 目录，不是 jar
+        def appJar = tasks.named('jar').get().archiveFile.get().asFile
+        if (!embedded.any { it.name == appJar.name }) {
+            embedded = embedded + [appJar]
+        }
+        embedded.each { f ->
+            arguments.add('/resource:' + f.absolutePath + ',lib/' + f.name)
+        }
+        arguments.add('/resource:' + splash.absolutePath + ',splash.gif')
+        // 缺 Java 时用这个脚本自动下到 data\jre（启动器从 runtime 目录调它）
+        def installJava = file('src/dist/install-java.ps1')
+        arguments.add('/resource:' + installJava.absolutePath + ',install-java.ps1')
+        exec { commandLine([csc.absolutePath] + arguments) }
+        logger.lifecycle('single exe: ' + target.absolutePath + ' '
+                + (target.length() / 1048576.0).round(1) + ' MB')
     }
 }
 
@@ -291,3 +335,71 @@ tasks.register("releaseZip", Zip) {
     exclude "data/**"
     outputs.upToDateWhen { false }
 }
+
+// ============================================================
+//  构建期注入：微软客户端 ID
+//  真实值放 config/client-id.properties（不入库）；样例文件入库存空。
+//  只读文件与 -P 参数，刻意「不读环境变量」：
+//  环境变量会被启动游戏的子进程继承，等于把 ID 送到每个 mod 手里。
+// ============================================================
+def clientIdFile = file('config/client-id.properties')
+
+def clientIdValue = providers.provider {
+    String fromFile = ''
+    if (clientIdFile.isFile()) {
+        def props = new Properties()
+        clientIdFile.withInputStream { props.load(it) }
+        fromFile = (props.getProperty('microsoft.client.id') ?: '').trim()
+    }
+    // -Pbrisk.ms.client.id=... 只用于临时本地测试，优先于文件
+    String override = (project.findProperty('brisk.ms.client.id') ?: '').trim()
+    override ?: fromFile
+}
+
+def generateBuildInfo = tasks.register('generateBuildInfo') {
+    group = 'build'
+    description = '把客户端 ID 等构建期信息写成 jar 内的 assets/brisk-build.properties'
+    def outDir = layout.buildDirectory.dir('generated/buildinfo/assets')
+    def outFile = outDir.map { it.file('brisk-build.properties') }
+    inputs.property('microsoft.client.id', clientIdValue)
+    outputs.file(outFile)
+    doLast {
+        def f = outFile.get().asFile
+        f.parentFile.mkdirs()
+        def v = clientIdValue.get()
+        f.withWriter('UTF-8') { w ->
+            w.write('# generated by gradle - do not edit\n')
+            w.write("microsoft.client.id=${v}\n")
+            w.write("build.version=${project.version}\n")
+            w.write("build.flavor=${v ? 'official' : 'oss'}\n")
+        }
+        logger.lifecycle(v ? 'build-info: 已注入客户端 ID（官方构建）'
+                : 'build-info: 未配置客户端 ID（OSS 构建，登录时会提示未配置）')
+    }
+}
+
+tasks.named('processResources') {
+    from(generateBuildInfo) { into 'assets' }
+}
+
+// 守门员：如果哪天 client-id.properties 被 git 跟踪了，直接让构建失败
+def guardClientId = tasks.register('guardClientIdNotTracked') {
+    group = 'verification'
+    description = '确认 config/client-id.properties 没有被 git 跟踪'
+    doLast {
+        if (!clientIdFile.isFile() || !clientIdValue.get()) {
+            return
+        }
+        def result = exec {
+            commandLine 'git', 'ls-files', '--error-unmatch', 'config/client-id.properties'
+            ignoreExitValue = true
+            standardOutput = new ByteArrayOutputStream()
+            errorOutput = new ByteArrayOutputStream()
+        }
+        if (result.exitValue == 0) {
+            throw new GradleException('config/client-id.properties 已被 git 跟踪！'
+                    + '先执行 git rm --cached config/client-id.properties，并检查提交历史。')
+        }
+    }
+}
+tasks.named('installDist') { dependsOn guardClientId }

@@ -190,17 +190,26 @@ public final class MclContext {
 
     public MclContext() {
         // 语言包 / 主题包目录：首次运行建立并写入结构说明
+        MclApplication.trace("ctx: modpackExporter");
         modpackExporter.setModrinthClient(modrinth);
+        MclApplication.trace("ctx: migrateHeavyDirs");
         com.brisklauncher.mcl.AppPaths.migrateHeavyDirs();
         // 安全审计 H-02：data/ 与 plugins/native 也要加固（安装目录常是公共/可移动位置）
+        MclApplication.trace("ctx: hardenDataDirs");
         com.brisklauncher.mcl.AppPaths.hardenDataDirs();
+        MclApplication.trace("ctx: migrateOldLogs");
         com.brisklauncher.mcl.AppPaths.migrateOldLogs();
+        com.brisklauncher.mcl.AppPaths.migrateAccountsFile();
         // 遗留的 *.tmp（move 失败留下的）在背景清掉，别让 data/cache 越滚越大
+        MclApplication.trace("ctx: cleanStaleTempFiles");
         com.brisklauncher.mcl.AppPaths.cleanStaleTempFiles();
         // 安全审计 L-03：frpc.toml 里有明文 token，上次异常退出可能留下残留
         frp.cleanStaleConfig();
+        MclApplication.trace("ctx: Packs.ensure");
         com.brisklauncher.mcl.setting.Packs.ensure();
+        MclApplication.trace("ctx: LauncherLock");
         this.lock = LauncherLock.acquire(AppPaths.launcherRoot());
+        MclApplication.trace("ctx: settings.load");
         LauncherSettings settings = settingsStore.load();
         // 注意：不要把「解析后的客户端 ID」写回 settings，
         // 否则玩家在设置页清空后，重启又会被源码里的值填回来。
@@ -209,12 +218,28 @@ public final class MclContext {
         if (!settings.language().equals(I18n.currentLocaleTag())) {
             I18n.setLocale(resolveLanguage(settings));
         }
+        MclApplication.trace("ctx: rebuild bundle");
         rebuild(settings);
         gameRepository().ensureDefaultRoot();
         // 版本列表即时更新：背景比对 versions/ 的变化（外部启动器改动也吃得到）
         startInstancesWatcher();
-        if (settings.crashRuleRemoteUpdate()) {
-            Thread.ofVirtual().name("mcl-crash-rules").start(crashRules::updateRemote);
+        MclApplication.trace("ctx: 完成");
+    }
+
+    /**
+     * 背景更新崩溃规则（網路操作，不該跟啟動搶 CPU）。
+     *
+     * <p>以前放在建構子裡，會跟「建主介面」同時跑；現在由 {@code MclApplication}
+     * 在主介面出現之後再呼叫。
+     */
+    public void updateCrashRulesInBackground() {
+        try {
+            if (settingsStore.load().crashRuleRemoteUpdate()) {
+                Thread.ofVirtual().name("mcl-crash-rules").start(crashRules::updateRemote);
+            }
+        } catch (Throwable error) {
+            com.brisklauncher.mcl.security.SafeLog.warn(
+                    "崩溃规则更新启动失败：" + error.getClass().getSimpleName());
         }
     }
 
@@ -496,6 +521,12 @@ public final class MclContext {
         Thread watcher = instancesWatcher;
         if (watcher != null) {
             watcher.interrupt();
+        }
+        // 插件必须在服务、下载器、实例锁都还活着的时候卸载：onUnload 里可能还要用日志 / HTTP
+        try {
+            plugins.unloadAll();
+        } catch (Throwable error) {
+            SafeLog.warn("卸载插件失败：" + error.getClass().getSimpleName());
         }
         try {
             frp.stop();

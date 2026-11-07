@@ -85,7 +85,7 @@ public final class VersionSettingsDialog {
       dialog.setTitle(I18n.t("version.settings.title"));
       String var10002 = I18n.t("version.settings.title");
       Label title = new Label("⚙ " + var10002 + " · " + entry.id());
-      title.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #14453F;");
+      title.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: -brisk-text;");
       Button close = UiKit.closeButtonStyled();
       close.getStyleClass().addAll(new String[]{"window-button", "window-close"});
       close.setOnAction((e) -> dialog.close());
@@ -167,8 +167,22 @@ public final class VersionSettingsDialog {
 
          });
       });
+      // 「删除此实例」从「加载器」页搬过来：放在「升级 Mod 到其它版本」右边（功能不变）
+      Button deleteInstance = new Button(I18n.t("version.settings.delete_instance"));
+      deleteInstance.getStyleClass().addAll(new String[]{"button", "window-close"});
+      // 两段式确认：不开模态确认框（模态 + 之后关闭 owner 会让 JavaFX 卡死）
+      boolean[] armed = new boolean[1];
+      deleteInstance.setOnAction((e) -> {
+         if (!armed[0]) {
+            armed[0] = true;
+            deleteInstance.setText(I18n.t("version.settings.delete_confirm_button"));
+            return;
+         }
+         deleteInstance.setDisable(true);
+         deleteInstance(dialog, context, entry, onChanged);
+      });
       FlowPane actions = new FlowPane((double)8.0F, (double)8.0F);
-      actions.getChildren().addAll(new Node[]{UiKit.noShrink(openGameDir), UiKit.noShrink(renameEntry), UiKit.noShrink(repair), UiKit.noShrink(exportPack), UiKit.noShrink(serverPack), UiKit.noShrink(upgrade)});
+      actions.getChildren().addAll(new Node[]{UiKit.noShrink(openGameDir), UiKit.noShrink(renameEntry), UiKit.noShrink(repair), UiKit.noShrink(exportPack), UiKit.noShrink(serverPack), UiKit.noShrink(upgrade), UiKit.noShrink(deleteInstance)});
       // 开发期：直接打开「重命名」弹窗截图（-Dmcl.dev.renameprompt=1）
       if (System.getProperty("mcl.dev.renameprompt") != null) {
          Platform.runLater(() -> Platform.runLater(renameEntry::fire));
@@ -519,7 +533,7 @@ public final class VersionSettingsDialog {
             Label enabledTag = new Label(item.enabled() ? I18n.t("content.tag.enabled") : I18n.t("content.tag.disabled"));
             enabledTag.getStyleClass().add("tag");
             enabledTag.setMinWidth(Double.NEGATIVE_INFINITY);
-            enabledTag.setStyle(item.enabled() ? "-fx-text-fill: #2E8B62;" : "-fx-text-fill: #0F7C72;");
+            enabledTag.setStyle(item.enabled() ? "-fx-text-fill: -brisk-ok;" : "-fx-text-fill: -brisk-accent-2;");
             tags.getChildren().add(enabledTag);
          }
 
@@ -537,14 +551,14 @@ public final class VersionSettingsDialog {
                enabledTag.getStyleClass().add("tag");
                enabledTag.setMinWidth(Double.NEGATIVE_INFINITY);
                enabledTag.setStyle(fresh.enabled()
-                       ? "-fx-text-fill: #2E8B62;" : "-fx-text-fill: #0F7C72;");
+                       ? "-fx-text-fill: -brisk-ok;" : "-fx-text-fill: -brisk-accent-2;");
                tags.getChildren().add(enabledTag);
             }
             if (modded && fresh.hasUpdate()) {
                Label updateTag = new Label(I18n.t("content.tag.update"));
                updateTag.getStyleClass().add("tag");
                updateTag.setMinWidth(Double.NEGATIVE_INFINITY);
-               updateTag.setStyle("-fx-text-fill: #C96A1B; -fx-font-weight: bold;");
+               updateTag.setStyle("-fx-text-fill: -brisk-warning; -fx-font-weight: bold;");
                tags.getChildren().add(updateTag);
             }
             // 背景解析回来才知道专案 id / 图示网址：本地没有图标时在这里补上
@@ -778,20 +792,7 @@ public final class VersionSettingsDialog {
 
             dialog.close();
          }));
-      Button deleteInstance = new Button(I18n.t("version.settings.delete_instance"));
-      deleteInstance.getStyleClass().addAll(new String[]{"button", "window-close"});
-      // 两段式确认：不开模态确认框（模态 + 之后关闭 owner 会让 JavaFX 卡死）
-      boolean[] armed = new boolean[1];
-      deleteInstance.setOnAction((e) -> {
-         if (!armed[0]) {
-            armed[0] = true;
-            deleteInstance.setText(I18n.t("version.settings.delete_confirm_button"));
-            return;
-         }
-         deleteInstance.setDisable(true);
-         deleteInstance(dialog, context, entry, onChanged);
-      });
-      loaderBox.getChildren().addAll(new Node[]{loaderInfo, conflictHint, manageLoader, deleteInstance});
+      loaderBox.getChildren().addAll(new Node[]{loaderInfo, conflictHint, manageLoader});
       Tab loaderTab = new Tab(I18n.t("version.tab.loader"), loaderBox);
       VBox logBox = new VBox((double)12.0F);
       logBox.setPadding(new Insets((double)16.0F));
@@ -851,7 +852,7 @@ public final class VersionSettingsDialog {
       VBox root = new VBox((double)12.0F, new Node[]{header, tabs, footer});
       root.setPadding(new Insets((double)18.0F));
       root.setPrefSize((double)740.0F, (double)560.0F);
-      root.setStyle("-fx-background-color: #F4FCFA; -fx-background-radius: 12; -fx-border-color: #BFE9E2; -fx-border-radius: 12; -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.2), 15, 0, 0, 5);");
+      root.setStyle("-fx-background-color: -brisk-bg; -fx-background-radius: 12; -fx-border-color: -brisk-border; -fx-border-radius: 12; -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.2), 15, 0, 0, 5);");
       Scene scene = new Scene(root, (double)740.0F, (double)560.0F);
       UiKit.applyTheme(scene);
       scene.setFill(Color.TRANSPARENT);

@@ -95,7 +95,7 @@ public final class MCLDialog {
         Stage dialog = themedStage(owner);
 
         Label titleLabel = new Label(title);
-        titleLabel.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #14453F;");
+        titleLabel.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: -brisk-text;");
 
         VBox body = new VBox(8);
         body.setMaxWidth(620);
@@ -107,27 +107,27 @@ public final class MCLDialog {
             CrashAnalysis.Match first = analysis.matches().get(0);
             // 原因（最可能的一条单独突出）
             Label causeTitle = new Label("🩺 " + first.rule().category());
-            causeTitle.setStyle("-fx-font-weight: bold; -fx-text-fill: #14453F;");
+            causeTitle.setStyle("-fx-font-weight: bold; -fx-text-fill: -brisk-text;");
             Label cause = new Label(first.rule().explanation());
             cause.setWrapText(true);
-            cause.setStyle("-fx-font-size: 14px; -fx-font-weight: bold; -fx-text-fill: #0B6E63;");
+            cause.setStyle("-fx-font-size: 14px; -fx-font-weight: bold; -fx-text-fill: -brisk-accent-deep;");
             body.getChildren().addAll(causeTitle, cause);
 
             // 建议
             Label fixTitle = new Label("🛠 建议解决办法");
-            fixTitle.setStyle("-fx-font-weight: bold; -fx-text-fill: #14453F;");
+            fixTitle.setStyle("-fx-font-weight: bold; -fx-text-fill: -brisk-text;");
             Label fix = new Label(first.rule().suggestion());
             fix.setWrapText(true);
-            fix.setStyle("-fx-text-fill: #4A6A66;");
+            fix.setStyle("-fx-text-fill: -brisk-text-muted;");
             body.getChildren().addAll(fixTitle, fix);
 
             // 日志里抓到的「缺少的前置 Mod」：直接列名字，玩家照著去下载
             if (analysis.missingMods() != null && !analysis.missingMods().isEmpty()) {
                 Label missingTitle = new Label(I18n.t("crash.missing_mods_title"));
-                missingTitle.setStyle("-fx-font-weight: bold; -fx-text-fill: #0B6E63;");
+                missingTitle.setStyle("-fx-font-weight: bold; -fx-text-fill: -brisk-accent-deep;");
                 Label missing = new Label(String.join("、", analysis.missingMods()));
                 missing.setWrapText(true);
-                missing.setStyle("-fx-text-fill: #C0392B; -fx-font-size: 13px;"
+                missing.setStyle("-fx-text-fill: -brisk-danger; -fx-font-size: 13px;"
                         + " -fx-font-weight: bold;");
                 javafx.scene.layout.HBox missingRow = new javafx.scene.layout.HBox(8, missing);
                 missingRow.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
@@ -155,7 +155,7 @@ public final class MCLDialog {
                 com.brisklauncher.mcl.crash.LaunchTimeline.events();
         if (!timeline.isEmpty()) {
             Label timelineTitle = new Label("🕒 崩溃时间线（版本启动 → 崩溃）");
-            timelineTitle.setStyle("-fx-font-weight: bold; -fx-text-fill: #14453F;");
+            timelineTitle.setStyle("-fx-font-weight: bold; -fx-text-fill: -brisk-text;");
             javafx.scene.control.TitledPane timelinePane =
                     new javafx.scene.control.TitledPane("", CrashTimelineView.section(timeline));
             timelinePane.setExpanded(true);
@@ -169,12 +169,12 @@ public final class MCLDialog {
         if (analysis == null || !analysis.hasMatches()) {
             Label unknown = new Label(I18n.t("crash.no_analysis"));
             unknown.setWrapText(true);
-            unknown.setStyle("-fx-text-fill: #4A6A66;");
+            unknown.setStyle("-fx-text-fill: -brisk-text-muted;");
             body.getChildren().add(unknown);
         } else if (analysis.matches().size() > 1) {
             // 其余可能
             Label moreTitle = new Label("📋 其他可能原因");
-            moreTitle.setStyle("-fx-font-weight: bold; -fx-text-fill: #14453F;");
+            moreTitle.setStyle("-fx-font-weight: bold; -fx-text-fill: -brisk-text;");
             VBox more = new VBox(4);
             for (int i = 1; i < analysis.matches().size(); i++) {
                 CrashAnalysis.Match match = analysis.matches().get(i);
@@ -192,7 +192,7 @@ public final class MCLDialog {
 
         if (analysis != null && !analysis.suspectMods().isEmpty()) {
             Label modsTitle = new Label("🧩 疑似相关的 Mod");
-            modsTitle.setStyle("-fx-font-weight: bold; -fx-text-fill: #14453F;");
+            modsTitle.setStyle("-fx-font-weight: bold; -fx-text-fill: -brisk-text;");
             Label mods = new Label(String.join("、", analysis.suspectMods()));
             mods.setWrapText(true);
             mods.getStyleClass().add("cat-hint");
@@ -202,12 +202,12 @@ public final class MCLDialog {
         // 崩溃分析（命中规则的完整说明，放在日志之前；启动失败时的错误消息也归到这里）
         if (analysis != null && !analysis.matches().isEmpty() || (message != null && !message.isBlank())) {
             Label analysisTitle = new Label("🔍 崩溃分析");
-            analysisTitle.setStyle("-fx-font-weight: bold; -fx-text-fill: #14453F;");
+            analysisTitle.setStyle("-fx-font-weight: bold; -fx-text-fill: -brisk-text;");
             VBox analysisBox = new VBox(4);
             if (message != null && !message.isBlank()) {
                 Label messageLabel = new Label(message);
                 messageLabel.setWrapText(true);
-                messageLabel.setStyle("-fx-text-fill: #0B6E63;");
+                messageLabel.setStyle("-fx-text-fill: -brisk-accent-deep;");
                 analysisBox.getChildren().add(messageLabel);
             }
             for (CrashAnalysis.Match match : analysis.matches()) {
@@ -306,11 +306,11 @@ public final class MCLDialog {
         Stage dialog = themedStage(owner);
 
         Label titleLabel = new Label("✦ " + title);
-        titleLabel.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #14453F;");
+        titleLabel.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: -brisk-text;");
 
         Label messageLabel = new Label(message == null ? "" : message);
         messageLabel.setWrapText(true);
-        messageLabel.setStyle("-fx-text-fill: #4A6A66; -fx-font-size: 13px;");
+        messageLabel.setStyle("-fx-text-fill: -brisk-text-muted; -fx-font-size: 13px;");
 
         javafx.scene.control.TextField input = new javafx.scene.control.TextField(
                 defaultValue == null ? "" : defaultValue);
@@ -319,7 +319,7 @@ public final class MCLDialog {
         Label errorLabel = new Label("");
         errorLabel.setWrapText(true);
         errorLabel.setMaxWidth(360);
-        errorLabel.setStyle("-fx-text-fill: #B23B2E; -fx-font-size: 12px;");
+        errorLabel.setStyle("-fx-text-fill: -brisk-danger; -fx-font-size: 12px;");
         errorLabel.setManaged(false);
         errorLabel.setVisible(false);
         // 预填值（什么都没改）一律不可提交：避免「按 Enter 就把名字改成 旧名+新名 这种怪结果」
@@ -406,10 +406,10 @@ public final class MCLDialog {
         Stage dialog = themedStage(owner);
 
         Label titleLabel = new Label("✦ " + title);
-        titleLabel.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #14453F;");
+        titleLabel.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: -brisk-text;");
         Label messageLabel = new Label(message == null ? "" : message);
         messageLabel.setWrapText(true);
-        messageLabel.setStyle("-fx-text-fill: #4A6A66; -fx-font-size: 13px;");
+        messageLabel.setStyle("-fx-text-fill: -brisk-text-muted; -fx-font-size: 13px;");
 
         javafx.scene.control.ListView<T> list = new javafx.scene.control.ListView<>();
         list.getItems().setAll(items);
@@ -493,8 +493,8 @@ public final class MCLDialog {
     /** 统一的弹窗外观：圆角、暖色背景、阴影 + 主题样式表。 */
     private static void decorate(Stage dialog, VBox root) {
         root.setPadding(new Insets(20));
-        root.setStyle("-fx-background-color: #F4FCFA; -fx-background-radius: 12;"
-                + " -fx-border-color: #BFE9E2; -fx-border-radius: 12;"
+        root.setStyle("-fx-background-color: -brisk-bg; -fx-background-radius: 12;"
+                + " -fx-border-color: -brisk-border; -fx-border-radius: 12;"
                 + " -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.2), 15, 0, 0, 5);");
         // 无边框弹窗：按住标题列可以拖动
         javafx.scene.Node dragHandle = root.getChildren().isEmpty()
@@ -530,7 +530,7 @@ public final class MCLDialog {
         dialog.initStyle(StageStyle.TRANSPARENT);
 
         Label titleLabel = new Label(title);
-        titleLabel.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #14453F;");
+        titleLabel.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: -brisk-text;");
 
         Label messageLabel = new Label(message == null ? "" : message);
         messageLabel.setWrapText(true);

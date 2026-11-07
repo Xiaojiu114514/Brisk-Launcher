@@ -253,6 +253,10 @@ public final class GameScanner {
         if (major == 20) {
             return "1.20." + minor;
         }
+        if (major >= 25) {
+            // 新编号：NeoForge 26.3.x 对应的就是 MC 26.3（不再是 1.x）
+            return major + "." + minor;
+        }
         return "1." + major + "." + minor;
     }
 

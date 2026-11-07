@@ -66,6 +66,7 @@ public final class SettingsStore {
             root.put("microsoftClientId", encryptedClientId == null ? "" : encryptedClientId);
             root.put("autoLanguage", settings.autoLanguage());
         root.put("autoUpdate", settings.autoUpdate());
+            root.put("autoInstallUpdate", settings.autoInstallUpdate());
             root.put("updateChannel", settings.updateChannel());
             root.put("updateRepo", settings.updateRepo());
             MAPPER.writerWithDefaultPrettyPrinter().writeValue(file.toFile(), root);
@@ -102,6 +103,16 @@ public final class SettingsStore {
         }
         try {
             JsonNode node = MAPPER.readTree(file.toFile());
+            // 历史 bug：LauncherSettings.defaults() 曾把更新仓库名写进 microsoftClientId，
+            // 于是首次启动的 launcher.json 里就带着一个「格式不正确的客户端 ID」，登录必失败。
+            // 读到时直接丢弃（下次保存会写回空值），避免使用者被这条假数据卡住。
+            String storedClientId = com.brisklauncher.mcl.security.SecretBox.decrypt(
+                    node.path("microsoftClientId").asText(""));
+            if (storedClientId.equals(LauncherSettings.DEFAULT_UPDATE_REPO)
+                    || storedClientId.equals(LauncherSettings.GITEE_UPDATE_REPO)) {
+                SafeLog.info("已丢弃误写入的客户端 ID（旧版本 defaults 参数顺序错误）");
+                storedClientId = "";
+            }
             return new LauncherSettings(
                     LauncherSettings.Source.parse(node.path("source").asText(defaults.source().name())),
                     node.path("customMirror").asText(defaults.customMirror()),
@@ -115,9 +126,9 @@ public final class SettingsStore {
                     node.path("frpPath").asText(defaults.frpPath()),
                     node.path("proxy").asText(defaults.proxy()),
                     node.path("insecureTls").asBoolean(defaults.insecureTls()),
-                    com.brisklauncher.mcl.security.SecretBox.decrypt(
-                            node.path("microsoftClientId").asText(defaults.microsoftClientId())),
+                    storedClientId,
                     node.path("autoUpdate").asBoolean(defaults.autoUpdate()),
+                    node.path("autoInstallUpdate").asBoolean(defaults.autoInstallUpdate()),
                     node.path("updateChannel").asText(defaults.updateChannel()),
                     node.path("updateRepo").asText(defaults.updateRepo()));
         } catch (Exception e) {

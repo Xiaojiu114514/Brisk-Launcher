@@ -4,6 +4,7 @@ import com.brisklauncher.mcl.i18n.I18n;
 import com.brisklauncher.mcl.ui.AccountPage;
 import com.brisklauncher.mcl.ui.DownloadPage;
 import com.brisklauncher.mcl.ui.LaunchPage;
+import com.brisklauncher.mcl.ui.LaunchSplash;
 import com.brisklauncher.mcl.ui.MCLDialog;
 import com.brisklauncher.mcl.ui.MclPage;
 import com.brisklauncher.mcl.ui.OnlinePage;
@@ -25,6 +26,7 @@ import javafx.util.Duration;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Supplier;
@@ -57,6 +59,8 @@ public final class MclApplication extends Application {
     private DownloadPage downloadPage;
     private StartupOverlay startupOverlay;
     private TopBar topBar;
+    /** 启动动画（主界面就绪后置为 null）。 */
+    private LaunchSplash splash;
 
     private String currentPageKey = "launch";
     private boolean transitioning;
@@ -69,50 +73,163 @@ public final class MclApplication extends Application {
 
     @Override
     public void start(Stage stage) {
+        trace("start()：JavaFX 就绪");
         // 崩溃时间线的起点：启动器启动的那一瞬间
         com.brisklauncher.mcl.crash.LaunchTimeline.launcherStarted();
         instance = this;
         this.stage = stage;
-        this.context = new MclContext();
-        if (context.alreadyRunning()) {
+
+        // 1) 先把启动动画显示出来：双击后立刻有反馈（动画马上跑），重活全部挪到背景线程
+        showSplash(stage);
+
+        // 2) 背景初始化（MclContext / 插件扫描）：做完再回 FX 线程建主界面
+        Thread.ofVirtual().name("mcl-startup").start(this::initializeInBackground);
+    }
+
+    /** 启动动画：小窗 + 居中，动画立刻开始跑（只用形狀 + 时间轴，不碰网络与磁盘大IO）。 */
+    private void showSplash(Stage stage) {
+        trace("splash: 建 nodes");
+        this.sceneRoot = new StackPane();
+        this.sceneRoot.getStyleClass().add("app-root");
+        this.splash = new LaunchSplash();
+        this.sceneRoot.getChildren().setAll(splash);
+        trace("splash: LaunchSplash 建好");
+
+        // 380×240 留出阴影与圆角的余量（太小会把卡片下缘裁掉）
+        this.scene = new Scene(sceneRoot, 380, 240);
+        this.scene.setFill(javafx.scene.paint.Color.TRANSPARENT);
+        trace("splash: Scene 建好");
+        try {
+            // 基础样式：提供 -brisk-* 设计变量
+            var resource = MclApplication.class.getResource("/styles/mcl-theme.css");
+            if (resource != null) {
+                this.scene.getStylesheets().add(resource.toExternalForm());
+            }
+        } catch (Throwable ignored) {
+            // 样式失败也要能看到窗口
+        }
+        trace("splash: 基础样式就绪");
+        // 玩家自订主题（含第三方）：启动动画也要跟着换色，不能只有主介面换。
+        // 用轻量版（只读 theme.txt + 列 *.css + 安全扫描），完整扫描会多花 ~0.6 秒。
+        try {
+            int applied = 0;
+            for (String custom : com.brisklauncher.mcl.setting.ThemePacks.startupCssUris()) {
+                if (!this.scene.getStylesheets().contains(custom)) {
+                    this.scene.getStylesheets().add(custom);
+                    applied++;
+                }
+            }
+            trace("splash: 主题样式就绪（" + applied + " 份）");
+        } catch (Throwable error) {
+            // 主题坏掉不该挡住启动动画
+            trace("splash: 主题样式失败 " + error.getClass().getSimpleName());
+        }
+
+        stage.initStyle(StageStyle.TRANSPARENT);
+        stage.setTitle("Brisk Launcher");
+        stage.setScene(this.scene);
+        stage.setResizable(false);
+        stage.centerOnScreen();
+        trace("splash: 准备 show()");
+        stage.show();
+        trace("splash: show() 返回");
+        splash.play();
+        closeNativeSplash();
+        trace("启动动画已显示");
+    }
+
+    /**
+     * 關掉 JVM {@code -splash:} 的原生啟動圖。
+     *
+     * <p>啟動腳本（VBS / launch.ps1 / jpackage）會用 {@code -splash:splash.gif} 讓 JVM 在
+     * JavaFX 起來之前就先顯示一張圖；那張圖不歸 JavaFX 管，JavaFX 視窗出現後要自己關，
+     * 否則會一直蓋在畫面上。沒有 {@code -splash}（例如從 IDE 啟動）就是 no-op。
+     */
+    private static void closeNativeSplash() {
+        try {
+            java.awt.SplashScreen nativeSplash = java.awt.SplashScreen.getSplashScreen();
+            if (nativeSplash != null) {
+                nativeSplash.close();
+                trace("native splash: 已关闭");
+            } else {
+                trace("native splash: 无（没有 -splash 参数）");
+            }
+        } catch (Throwable ignored) {
+            // AWT splash 不存在 / 关不掉都不影响启动
+        }
+    }
+
+    /** 背景线程：这里做的每件事都不需要 FX 线程。 */
+    private void initializeInBackground() {
+        try {
+            trace("构造 MclContext");
+            MclContext created = new MclContext();
+            trace("MclContext 完成");
+            boolean running = created.alreadyRunning();
+            if (!running) {
+                // 插件：启动时扫一次（读 jar 头 + 每支 jar 一次 SHA-256），导航页要在建顶栏前就位
+                try {
+                    created.plugins().load();
+                } catch (Throwable error) {
+                    com.brisklauncher.mcl.security.SafeLog.warn(
+                            "插件加载失败：" + error.getClass().getSimpleName());
+                }
+                trace("插件扫描完成");
+            }
+
+            Platform.runLater(() -> onStartupReady(created, running));
+        } catch (Throwable error) {
+            com.brisklauncher.mcl.security.SafeLog.warn("启动初始化失败："
+                    + error.getClass().getSimpleName() + " " + error.getMessage());
+            Platform.runLater(() -> onStartupFailed(error));
+        }
+    }
+
+    /** 回到 FX 线程：建主界面、把启动动画换成真正的主界面。 */
+    private void onStartupReady(MclContext created, boolean running) {
+        trace("回到 FX 线程");
+        if (running) {
+            if (splash != null) {
+                splash.stop();
+            }
             MCLDialog.error(null, "Brisk Launcher", I18n.t("launcher.already_running"));
-            context.shutdown();
+            created.shutdown();
             Platform.exit();
             return;
         }
+        this.context = created;
         if (languageOverride != null && !languageOverride.isBlank()) {
             I18n.setLocale(languageOverride);
-        } else if (context != null) {
+        } else {
             // 自动跟随系统语言（设定页可关）；没有 --language= 覆盖时生效
-            I18n.setLocale(com.brisklauncher.mcl.MclContext.resolveLanguage(context.settings()));
+            I18n.setLocale(MclContext.resolveLanguage(context.settings()));
         }
         if (pageOverride != null && !pageOverride.isBlank()) {
             currentPageKey = pageOverride;
         }
 
-        this.sceneRoot = new StackPane();
         buildUi();
+        trace("buildUi 完成");
 
-        scene = new Scene(sceneRoot, 1180, 760);
         applyThemeBackground();
-        scene.getStylesheets().add(Objects.requireNonNull(
-                getClass().getResource("/styles/mcl-theme.css")).toExternalForm());
+        // 预载样式 + 玩家自订主题（以前只加基础样式，重开启动器会「忘记」主题，要重新选一次）
+        com.brisklauncher.mcl.ui.UiKit.applyTheme(scene);
         // 透明 Scene + 圆角背景 = 无边框窗口也能有舒服的圆角
         scene.setFill(javafx.scene.paint.Color.TRANSPARENT);
 
-        stage.initStyle(StageStyle.TRANSPARENT);
-        stage.setTitle("Brisk Launcher");
+        stage.setResizable(true);
         stage.setMinWidth(980);
         stage.setMinHeight(640);
-        stage.setScene(scene);
-        stage.setResizable(true);
-        com.brisklauncher.mcl.ui.WindowResizer.install(stage);
         // 拖拽导入（整合包 / mod / 资源包 / 光影 / 存档）
         com.brisklauncher.mcl.ui.DropImporter.install(scene, context);
 
         stage.setOnCloseRequest(event -> {
             event.consume();
             UiTransitions.fadeOut(sceneRoot, Duration.millis(160), () -> {
+                if (splash != null) {
+                    splash.stop();
+                    splash = null;
+                }
                 releaseAllPages();
                 if (topBar != null) {
                     topBar.dispose();
@@ -132,8 +249,30 @@ public final class MclApplication extends Application {
         });
 
         I18n.addListener(() -> Platform.runLater(this::rebuildUi));
-        stage.show();
+
+        // 主界面就位：放大到设计尺寸（启动动画一直居中），再把启动动画淡出
+        stage.setWidth(1180);
+        stage.setHeight(760);
+        stage.centerOnScreen();
+        if (splash != null) {
+            sceneRoot.getChildren().add(splash);
+            splash.fadeOut(() -> {
+                sceneRoot.getChildren().remove(splash);
+                splash = null;
+            });
+        }
         applyStyle(sceneRoot);
+        trace("主界面可见");
+        showInitialPageAfterPulse();
+        // 原生启动图：按目前主题重画 splash.gif（GIF 量化要几百毫秒，等主界面出来再做）
+        com.brisklauncher.mcl.ui.NativeSplashService.ensureUpToDateAsync();
+        trace("原生启动图已排程");
+        // 崩溃规则远端更新（网络）：等主界面出现之后再跑，别跟启动抢资源
+        try {
+            context.updateCrashRulesInBackground();
+        } catch (Throwable ignored) {
+            // 更新失败不影响启动
+        }
         if (languageSwitch != null && !languageSwitch.isBlank()) {
             scheduleLanguageSwitch(languageSwitch);
         }
@@ -314,11 +453,6 @@ public final class MclApplication extends Application {
     }
 
     /**
-     * 启动时检查更新（只在设定页填了仓库地址、且开启自动更新时）。
-     *
-     * <p>只读 release 资讯，发现新版本就问要不要打开下载页；不偷偷替换启动器档案。
-     */
-    /**
      * 孤儿令牌清理（安全审计 v2 A-09）。
      *
      * <p>`accounts.json` 写失败时令牌可能留在凭据管理器里，账号页看不到也删不掉。
@@ -328,6 +462,12 @@ public final class MclApplication extends Application {
         Thread.ofVirtual().name("mcl-orphan-creds").start(() -> {
             try {
                 var accounts = context.accounts();
+                // 这个数据目录里一个账号都没有时不要判定孤儿：凭据管理器是按 Windows 用户存的，
+                // 别的安装（旧的文件夹版 / 另一份便携 exe）的凭据会被误判成「残留」，
+                // 清掉就等于让那份安装的账号掉登录（第 166 轮踩过）。
+                if (accounts.listAll().isEmpty()) {
+                    return;
+                }
                 java.util.List<String> orphans = accounts.orphanTokenTargets();
                 if (orphans.isEmpty()) {
                     return;
@@ -348,29 +488,53 @@ public final class MclApplication extends Application {
         });
     }
 
+    /**
+     * 启动时检查更新（只在开启「自动检查更新」且仓库可用时）。
+     *
+     * <p>发现新版本后：开了「自动下载并覆盖更新」就直接下载 + 覆盖 + 重启；
+     * 没开就先确认。开发模式或安装目录不可写时不会假装更新，只会提示开下载页。
+     */
     private void checkUpdatesOnStartup() {
+        // 上一次自动更新留下的结果（脚本写在 <data>/updates/last-result.txt）：
+        // 失败要让玩家知道；成功只记日志，不再多弹一个视窗。
+        com.brisklauncher.mcl.update.UpdateInstaller.ApplyResult previous =
+                com.brisklauncher.mcl.update.UpdateInstaller.consumeResult();
+        if (previous != null && !previous.ok()) {
+            Platform.runLater(() -> {
+                if (stage == null || !stage.isShowing()) {
+                    return;
+                }
+                MCLDialog.error(stage, I18n.t("update.section"),
+                        I18n.t("update.apply_failed", previous.version(),
+                                previous.message() == null ? "" : previous.message()));
+            });
+        }
+        com.brisklauncher.mcl.update.UpdateInstaller.cleanStale();
+
         var settings = context.settings();
         if (!settings.autoUpdate() || !settings.updateConfigured()) {
             return;
         }
+        boolean autoInstall = settings.autoInstallUpdate();
         Thread.ofVirtual().name("mcl-update-check").start(() -> {
             var result = com.brisklauncher.mcl.update.UpdateService.check(settings);
             if (!result.ok() || !result.updateAvailable()) {
                 return;
             }
             var release = result.release();
-            String notes = release.notes() == null ? "" : release.notes();
-            if (notes.length() > 400) {
-                notes = notes.substring(0, 400) + "…";
+            if (release.version().equals(com.brisklauncher.mcl.update.UpdateInstaller.appliedVersion())) {
+                // 这个版本已经成功覆盖过，但远端还是「比 CURRENT_VERSION 新」——
+                // 通常是发版时忘了改 CURRENT_VERSION。再更新一次只会无限重启，所以略过。
+                com.brisklauncher.mcl.security.SafeLog.warn("[update] " + release.version()
+                        + " 已套用，但 CURRENT_VERSION 仍是 "
+                        + com.brisklauncher.mcl.update.UpdateService.CURRENT_VERSION + "，略过自动更新");
+                return;
             }
-            String body = I18n.t("update.available_body", release.version(),
-                    com.brisklauncher.mcl.update.UpdateService.CURRENT_VERSION, notes);
             Platform.runLater(() -> {
                 if (stage == null || !stage.isShowing()) {
                     return;
                 }
-                MCLDialog.confirm(stage, I18n.t("update.available_title"), body,
-                        () -> com.brisklauncher.mcl.ui.DesktopActions.openUrl(release.pageUrl()));
+                com.brisklauncher.mcl.ui.UpdateFlow.offer(stage, context, release, !autoInstall);
             });
         });
     }
@@ -668,19 +832,18 @@ public final class MclApplication extends Application {
         if (root == null) {
             return;
         }
-        var background = com.brisklauncher.mcl.setting.Packs.currentThemeBackground();
+        var theme = com.brisklauncher.mcl.setting.ThemePacks.current();
+        var background = theme.background();
         // 找一个已有的底图层（用 styleClass 标记，重建 UI 后也能复用）
-        javafx.scene.layout.Region backdrop = null;
-        for (javafx.scene.Node node : root.getChildren()) {
-            if (node.getStyleClass().contains("mcl-backdrop")) {
-                backdrop = (javafx.scene.layout.Region) node;
-                break;
-            }
-        }
+        javafx.scene.layout.Region backdrop = findLayer(root, "mcl-backdrop");
+        javafx.scene.layout.Region dimLayer = findLayer(root, "mcl-backdrop-dim");
         if (background == null) {
             if (backdrop != null) {
                 backdrop.setVisible(false);
                 backdrop.setClip(null);
+            }
+            if (dimLayer != null) {
+                dimLayer.setVisible(false);
             }
             root.setClip(null);
             for (javafx.scene.Node node : root.getChildren()) {
@@ -699,8 +862,30 @@ public final class MclApplication extends Application {
             root.getChildren().add(0, backdrop);
         }
         backdrop.setVisible(true);
+        String fit = theme.backgroundFit();
+        String size = switch (fit == null ? "cover" : fit) {
+            case "contain" -> "contain";
+            case "center" -> "auto";
+            default -> "cover";
+        };
         backdrop.setStyle("-fx-background-image: url('" + background.toUri() + "');"
-                + " -fx-background-size: cover; -fx-background-position: center;");
+                + " -fx-background-size: " + size + ";"
+                + " -fx-background-position: center;"
+                + ("repeat".equals(fit) ? " -fx-background-repeat: repeat;" : " -fx-background-repeat: no-repeat;"));
+        // 背景压暗：theme.json 的 backgroundDim（0–1）。画在底图之上、内容之下。
+        double dim = theme.backgroundDim();
+        if (dim > 0.001) {
+            if (dimLayer == null) {
+                dimLayer = new javafx.scene.layout.Region();
+                dimLayer.getStyleClass().add("mcl-backdrop-dim");
+                dimLayer.setMouseTransparent(true);
+                root.getChildren().add(1, dimLayer);
+            }
+            dimLayer.setVisible(true);
+            dimLayer.setStyle("-fx-background-color: rgba(0,0,0," + Math.min(1, dim) + ");");
+        } else if (dimLayer != null) {
+            dimLayer.setVisible(false);
+        }
         // 最外层容器也裁圆角：只裁内容层/底图的话，四角仍会露出底下的填充色（肉色）。
         javafx.scene.shape.Rectangle rootClip = new javafx.scene.shape.Rectangle();
         rootClip.setArcWidth(44);
@@ -735,11 +920,24 @@ public final class MclApplication extends Application {
         }
     }
 
+    /** 按 styleClass 找底图 / 压暗层（重建 UI 后也能复用同一层）。 */
+    private static javafx.scene.layout.Region findLayer(javafx.scene.layout.StackPane root,
+                                                       String styleClass) {
+        for (javafx.scene.Node node : root.getChildren()) {
+            if (node.getStyleClass().contains(styleClass) && node instanceof javafx.scene.layout.Region region) {
+                return region;
+            }
+        }
+        return null;
+    }
+
     /** 切换主题后热重载样式与背景（不重启）。 */
     public static void refreshTheme(javafx.scene.Scene scene) {
         if (scene == null) {
             return;
         }
+        // 丢缓存：使用者可能刚把档案丢进 data/themes/，按「重新扫描」就要看到
+        com.brisklauncher.mcl.setting.ThemePacks.invalidate();
         scene.getStylesheets().removeIf(sheet -> sheet.contains("/themes/"));
         com.brisklauncher.mcl.ui.UiKit.applyTheme(scene);
         if (scene.getRoot() instanceof javafx.scene.layout.StackPane root) {
@@ -768,17 +966,36 @@ public final class MclApplication extends Application {
         pageSuppliers.put("tools", () -> new com.brisklauncher.mcl.ui.ToolsPage(context));
         pageSuppliers.put("settings", () -> new SettingsPage(context));
 
+        // 插件贡献的导航页：顶栏插在「工具」与「设置」之间
+        List<com.brisklauncher.mcl.ui.TopBar.NavItem> pluginNav = new ArrayList<>();
+        try {
+            for (var ref : context.plugins().pages()) {
+                String key = com.brisklauncher.mcl.ui.PluginPage.keyOf(ref.entry(), ref.page());
+                pageSuppliers.put(key,
+                        () -> new com.brisklauncher.mcl.ui.PluginPage(ref.entry(), ref.page()));
+                String icon = ref.page().icon();
+                String label = icon == null || icon.isBlank()
+                        ? ref.page().title() : icon + " " + ref.page().title();
+                pluginNav.add(new com.brisklauncher.mcl.ui.TopBar.NavItem(key, label));
+            }
+        } catch (Throwable error) {
+            com.brisklauncher.mcl.security.SafeLog.warn(
+                    "插件导航页注册失败：" + error.getClass().getSimpleName());
+        }
+
         centerLayer = new StackPane();
+        trace("buildUi: centerLayer");
         Node initialPage = page(currentPageKey);
+        trace("buildUi: 首屏页面（" + currentPageKey + "）");
         if (initialPage == null) {
             initialPage = page("launch");
         }
         centerLayer.getChildren().addAll(initialPage, startupOverlay);
-        if (initialPage instanceof MclPage page) {
-            page.onShown();
-        }
+        // 注意：首屏的 onShown 不在這裡呼叫 —— 延到「視窗真的畫出來之後」的下一個脈衝，
+        // 否則掃實例 / 載皮膚那 0.5～0.8 秒會卡在「視窗還沒出現」之前（見 showInitialPageAfterPulse）。
 
-        topBar = new TopBar(stage, currentPageKey, this::showPage, context);
+        topBar = new TopBar(stage, currentPageKey, this::showPage, context, pluginNav);
+        trace("buildUi: TopBar");
         topBar.setOnMinimizeRequested(() -> UiTransitions.fadeOut(
                 sceneRoot, Duration.millis(150), () -> {
                     stage.setIconified(true);
@@ -809,6 +1026,29 @@ public final class MclApplication extends Application {
         }
         releaseAllPages();
         buildUi();
+        showInitialPageAfterPulse();
+    }
+
+    /**
+     * 首屏的 {@code onShown} 延到下一個脈衝再跑。
+     *
+     * <p>啟動頁要掃 {@code versions/}、讀實例設定、準備皮膚預覽，實測 0.5～0.8 秒；
+     * 以前它卡在 {@code buildUi()} 裡，等於「視窗遲遲不出現」。現在先讓窗口畫出來
+     * （清單暫時是空的），下一個脈衝再填資料 —— 使用者看到的是「視窗先出現、內容馬上補上」。
+     */
+    private void showInitialPageAfterPulse() {
+        Platform.runLater(() -> {
+            Node current = currentPage();
+            if (current instanceof MclPage page) {
+                try {
+                    page.onShown();
+                } catch (Throwable error) {
+                    com.brisklauncher.mcl.security.SafeLog.warn(
+                            "首屏初始化失败：" + error.getClass().getSimpleName());
+                }
+            }
+            trace("首屏 onShown 完成");
+        });
     }
 
     private void releaseAllPages() {
@@ -965,12 +1205,39 @@ public final class MclApplication extends Application {
     }
 
     private static void applyStyle(StackPane root) {
-        root.getStyleClass().add("app-root");
+        if (!root.getStyleClass().contains("app-root")) {
+            root.getStyleClass().add("app-root");
+        }
+    }
+
+    /**
+     * 启动耗时追踪：{@code -Dmcl.startup.trace=1} 时把各阶段打到控制台
+     * （毫秒，自 JVM 启动算起），用来判断「启动慢」到底慢在哪一段。
+     */
+    static void trace(String what) {
+        if (System.getProperty("mcl.startup.trace") == null) {
+            return;
+        }
+        long ms = java.lang.management.ManagementFactory.getRuntimeMXBean().getUptime();
+        System.out.println("[startup +" + ms + "ms] " + what);
+    }
+
+    /** 背景初始化失败：停在启动动画上把原因说清楚，然后退出（不要留一个空白窗口）。 */
+    private void onStartupFailed(Throwable error) {
+        if (splash != null) {
+            splash.stop();
+        }
+        String detail = error.getClass().getSimpleName()
+                + (error.getMessage() == null ? "" : "：" + error.getMessage());
+        MCLDialog.error(null, "Brisk Launcher", I18n.t("splash.failed", detail));
+        Platform.exit();
     }
 
     public static void main(String[] args) {
+        trace("main() 入口");
         // 必须在 JNA 加载前把原生库目录指到可写位置（jlink 镜像里 java.io.tmpdir 可能不可写）
         com.brisklauncher.mcl.security.NativeSetup.prepare();
+        trace("NativeSetup 完成");
         // JavaFX 默认把 prism/glass 原生库解压到 %USERPROFILE%\.openjfx；
         // 改到启动器自己的 native 目录，避免在 C 盘留下缓存或被杀软/权限拦截。
         System.setProperty("javafx.cachedir",
@@ -999,6 +1266,7 @@ public final class MclApplication extends Application {
         }
         // 允许用户显式指定代理；TLS 校验默认开启（insecureTls 需在 launcher.json 里显式打开）
         System.setProperty("java.net.preferIPv4Stack", "true");
+        trace("准备 launch()");
         launch(args);
     }
 }

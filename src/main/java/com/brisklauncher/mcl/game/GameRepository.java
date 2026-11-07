@@ -72,6 +72,31 @@ public final class GameRepository {
         rootStore.save(roots);
     }
 
+    /**
+     * 给版本文件夹起一个**只用于显示**的名字（不动真实文件夹）。
+     *
+     * <p>存进 versionroots.json 的 {@code displayName}；传空就恢复成文件夹名。
+     */
+    public void renameRoot(GameDirectory root, String displayName) {
+        if (root == null) {
+            return;
+        }
+        Path normalized = root.path().toAbsolutePath().normalize();
+        String name = displayName == null || displayName.isBlank() ? null : displayName.trim();
+        List<GameDirectory> roots = new ArrayList<>(rootStore.load());
+        boolean changed = false;
+        for (int i = 0; i < roots.size(); i++) {
+            if (roots.get(i).path().equals(normalized)) {
+                roots.set(i, new GameDirectory(normalized, name));
+                changed = true;
+            }
+        }
+        if (changed) {
+            rootStore.save(roots);
+            SafeLog.info("版本文件夹显示名已更新：" + normalized + " → " + name);
+        }
+    }
+
     public void removeRoot(GameDirectory root) {
         List<GameDirectory> roots = new ArrayList<>(rootStore.load());
         roots.removeIf(item -> item.path().equals(root.path()));
@@ -80,16 +105,86 @@ public final class GameRepository {
 
     /** 首次使用时自动发现官方启动器目录（参考 HMCL 的自动扫描）。 */
     public void ensureDefaultRoot() {
-        if (!rootStore.load().isEmpty()) {
-            return;
-        }
-        String appData = System.getenv("APPDATA");
-        if (appData != null) {
-            Path official = Path.of(appData, ".minecraft");
-            if (official.toFile().isDirectory()) {
-                addRoot(official);
+        java.util.List<GameDirectory> roots = new ArrayList<>(rootStore.load());
+        Path builtin = builtinRoot();
+        Path official = officialRoot();
+        String builtinName = label("version.root_default_name", "默认文件夹");
+        String officialName = label("version.root_official_name", "官方文件夹");
+        boolean changed = false;
+        if (roots.isEmpty()) {
+            // 新装：先建「启动器自带的 MC 目录」——exe 同级的 minecraft/（便携版就是 exe 旁边）。
+            // 版本隔离完全沿用现有逻辑（<root>/versions/<id>/、实例设置 instances/<id>/），
+            // 这里只是多注册一个 root，扫描 / 安装 / 启动的代码一行都不用改。
+            if (builtin != null) {
+                try {
+                    Files.createDirectories(builtin.resolve("versions"));
+                    roots.add(new GameDirectory(builtin, builtinName));
+                    changed = true;
+                    SafeLog.info("已建立启动器自带的游戏目录：" + builtin);
+                } catch (Exception error) {
+                    SafeLog.warn("建立内置游戏目录失败：" + error.getClass().getSimpleName());
+                }
+            }
+            if (official != null) {
+                roots.add(new GameDirectory(official, officialName));
+                changed = true;
+            }
+        } else {
+            // 旧版登记时没有显示名（等于文件夹名）→ 换成默认显示名，只改这两个特定目录，
+            // 玩家自己起过名字（≠ 文件夹名）的一律不动。
+            for (int i = 0; i < roots.size(); i++) {
+                GameDirectory root = roots.get(i);
+                Path path = root.path();
+                String folder = path.getFileName() == null ? "" : path.getFileName().toString();
+                if (!(root.displayName().equals(folder))) {
+                    continue;
+                }
+                if (builtin != null && path.equals(builtin)) {
+                    roots.set(i, new GameDirectory(path, builtinName));
+                    changed = true;
+                } else if (official != null && path.equals(official)) {
+                    roots.set(i, new GameDirectory(path, officialName));
+                    changed = true;
+                }
             }
         }
+        if (changed) {
+            rootStore.save(roots);
+        }
+    }
+
+    /** 官方 .minecraft（存在才算）。 */
+    private static Path officialRoot() {
+        String appData = System.getenv("APPDATA");
+        if (appData == null || appData.isBlank()) {
+            return null;
+        }
+        Path official = Path.of(appData, ".minecraft");
+        return official.toFile().isDirectory() ? official.toAbsolutePath().normalize() : null;
+    }
+
+    /** i18n 取不到时退回中文默认值（启动早期 I18n 可能还没初始化）。 */
+    private static String label(String key, String fallback) {
+        try {
+            String value = com.brisklauncher.mcl.i18n.I18n.t(key);
+            return value == null || value.isBlank() || value.startsWith("!") ? fallback : value;
+        } catch (Throwable error) {
+            return fallback;
+        }
+    }
+
+    /** 启动器自带的游戏目录：{@code <exe 同级>/minecraft}；拿不到 exe 目录就退回启动器数据根。 */
+    private static Path builtinRoot() {
+        // 单 exe 版：-Dmcl.appDir 直接就是 exe 所在目录，minecraft/ 要建在那里；
+        // 其次是「看起来像启动器目录」的 installDir；最后才退回启动器数据根。
+        Path base = com.brisklauncher.mcl.AppPaths.appDir();
+        if (base == null) {
+            base = com.brisklauncher.mcl.AppPaths.installDir();
+        }
+        if (base == null) {
+            base = com.brisklauncher.mcl.AppPaths.launcherRoot();
+        }
+        return base == null ? null : base.resolve("minecraft");
     }
 
     // ---------- 实例 ----------
@@ -209,7 +304,40 @@ public final class GameRepository {
     }
 
     public List<LoaderMetaClient.LoaderVersion> availableLoaders(LoaderInfo.LoaderType type, String mcVersion) {
-        return loaderInstaller.availableLoaders(type, mcVersion);
+        List<LoaderMetaClient.LoaderVersion> all = loaderInstaller.availableLoaders(type, mcVersion);
+        if (all == null || all.isEmpty()) {
+            return all == null ? List.of() : all;
+        }
+        // 统一在这里排序 + 过滤，所有界面（下载页、实例的加载器安装弹窗）行为一致：
+        // 1) 只列正式版（其他启动器也这样；全都没正式版时才退回列 beta，避免下拉是空的）
+        // 2) 版本号倒序：新的在前
+        // 全部列出（beta 也列，只是界面上不再打 "(beta)" 字样），只做「新的在前」排序
+        List<LoaderMetaClient.LoaderVersion> shown = new ArrayList<>(all);
+        shown.sort((a, b) -> compareLoaderVersions(b.version(), a.version()));
+        return shown;
+    }
+
+    /** 版本号比较（按数字段；比不了按字符串）。给下拉排序用。 */
+    private static int compareLoaderVersions(String a, String b) {
+        String[] left = String.valueOf(a).split("[.\\-_+]");
+        String[] right = String.valueOf(b).split("[.\\-_+]");
+        int count = Math.max(left.length, right.length);
+        for (int index = 0; index < count; index++) {
+            String x = index < left.length ? left[index] : "0";
+            String y = index < right.length ? right[index] : "0";
+            if (x.matches("\\d+") && y.matches("\\d+")) {
+                int compared = Long.compare(Long.parseLong(x), Long.parseLong(y));
+                if (compared != 0) {
+                    return compared;
+                }
+            } else {
+                int compared = x.compareToIgnoreCase(y);
+                if (compared != 0) {
+                    return compared;
+                }
+            }
+        }
+        return 0;
     }
 
     /** 补全/校验文件（修复残缺实例）。 */

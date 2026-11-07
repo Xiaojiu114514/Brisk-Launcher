@@ -66,7 +66,7 @@ public final class ModDependencyGraphDialog {
         dialog.setTitle(I18n.t("depgraph.title"));
 
         Label title = new Label("🔗 " + I18n.t("depgraph.title") + " · " + entry.id());
-        title.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #14453F;");
+        title.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: -brisk-text;");
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
         Button close = UiKit.closeButtonStyled();
@@ -75,8 +75,8 @@ public final class ModDependencyGraphDialog {
         header.setAlignment(Pos.CENTER_LEFT);
 
         Pane graphPane = new Pane();
-        graphPane.setStyle("-fx-background-color: #FBFFFE; -fx-background-radius: 12;"
-                + " -fx-border-color: #CBE9E4; -fx-border-radius: 12;"
+        graphPane.setStyle("-fx-background-color: -brisk-bg; -fx-background-radius: 12;"
+                + " -fx-border-color: -brisk-border-soft; -fx-border-radius: 12;"
                 + " -fx-cursor: open-hand;");
         graphPane.getStyleClass().add("no-window-drag");
         graphPane.setMinSize(600, 420);
@@ -85,8 +85,8 @@ public final class ModDependencyGraphDialog {
         StackPane graphViewport = new StackPane(graphPane);
         graphViewport.getStyleClass().add("no-window-drag");
         graphViewport.setAlignment(Pos.TOP_LEFT);
-        graphViewport.setStyle("-fx-background-color: #FBFFFE; -fx-background-radius: 12;"
-                + " -fx-border-color: #CBE9E4; -fx-border-radius: 12;");
+        graphViewport.setStyle("-fx-background-color: -brisk-bg; -fx-background-radius: 12;"
+                + " -fx-border-color: -brisk-border-soft; -fx-border-radius: 12;");
         // 缩放/平移后不会盖到面板外面
         Rectangle clip = new Rectangle();
         clip.widthProperty().bind(graphViewport.widthProperty());
@@ -228,8 +228,8 @@ public final class ModDependencyGraphDialog {
         // 不要在这个弹窗的 root 上挂 dropshadow：有阴影时 JavaFX 会把整个场景
         // 先渲染到离屏贴图再合成，拖动气泡时每一帧都会重新配置/回收这张贴图，
         // 记忆体就会一路往上爬（实测 500→950MB，手一停就停）。
-        root.setStyle("-fx-background-color: #F4FCFA; -fx-background-radius: 12;"
-                + " -fx-border-color: #BFE9E2; -fx-border-radius: 12;");
+        root.setStyle("-fx-background-color: -brisk-bg; -fx-background-radius: 12;"
+                + " -fx-border-color: -brisk-border; -fx-border-radius: 12;");
         VBox.setVgrow(graphViewport, Priority.ALWAYS);
 
         Scene scene = new Scene(root, 900, 660);

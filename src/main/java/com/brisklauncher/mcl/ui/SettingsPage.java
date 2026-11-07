@@ -44,16 +44,25 @@ public final class SettingsPage extends VBox implements MclPage {
     private final Spinner<Integer> memory = new Spinner<>(512, 65536, 4096, 256);
     private final ComboBox<String> language = new ComboBox<>();
     private final ComboBox<String> theme = new ComboBox<>();
+    /** 主题详情（缩图 + 说明 + 作者/版本 + 警告）。 */
+    private final Label themeDesc = new Label();
+    private final Label themeMeta = new Label();
+    private final Label themeWarnings = new Label();
+    private final javafx.scene.image.ImageView themePreview = new javafx.scene.image.ImageView();
+    private final VBox themeInfo = new VBox(4);
     private final TextField proxy = new TextField();
     private final CheckBox insecureTls = new CheckBox(I18n.t("settings.insecure_tls"));
     private final CheckBox optimizeMemory = new CheckBox(I18n.t("settings.optimize_memory"));
     private final CheckBox crashRemote = new CheckBox(I18n.t("settings.crash.remote_update"));
     private final CheckBox autoUpdate = new CheckBox(I18n.t("update.auto"));
+    private final CheckBox autoInstall = new CheckBox(I18n.t("update.auto_install"));
     private final ComboBox<String> updateChannel = new ComboBox<>();
 
     private final TextField frpPath = new TextField();
     private final CheckBox autoLanguage = new CheckBox(I18n.t("settings.auto_language"));
     private final TextField microsoftClientId = new TextField();
+    /** 「当前生效的客户端 ID 来自哪里」——避免发版时拿错 ID / 排查登录问题。 */
+    private final Label microsoftClientIdSource = new Label();
     private final VBox jdkList = new VBox(4);
     private final Label status = new Label();
 
@@ -73,30 +82,8 @@ public final class SettingsPage extends VBox implements MclPage {
         source.valueProperty().addListener((obs, oldValue, value) ->
                 customMirror.setDisable(!"Custom".equals(value)));
 
-        // 主题包：内建 default + {launcherRoot}/themes/*，切换即时生效
-        theme.getItems().clear();
-        for (Packs.Pack pack : Packs.themes()) {
-            theme.getItems().add(pack.name());
-        }
-        String currentTheme = Packs.currentTheme();
-        for (Packs.Pack pack : Packs.themes()) {
-            if (pack.id().equals(currentTheme)) {
-                theme.getSelectionModel().select(pack.name());
-            }
-        }
-        theme.valueProperty().addListener((obs, oldValue, value) -> {
-            if (value == null) {
-                return;
-            }
-            for (Packs.Pack pack : Packs.themes()) {
-                if (pack.name().equals(value)) {
-                    Packs.setTheme(pack.id());
-                    // 热重载：样式 + 背景 + 圆角一次刷新，不用重启
-                    com.brisklauncher.mcl.MclApplication.refreshTheme(getScene());
-                    return;
-                }
-            }
-        });
+        // 主题包：内建 default + data/themes/*，切换即时生效（格式见 THEME_DEV.md）
+        initThemeSection();
         // 语言选择立即生效并持久化（不需要再点保存）
         language.valueProperty().addListener((obs, oldValue, value) -> {
             if (value == null) {
@@ -182,13 +169,115 @@ public final class SettingsPage extends VBox implements MclPage {
         openLang.setOnAction(e -> openFolder(Packs.langDir()));
         Button openTheme = new Button(I18n.t("settings.open_theme_dir"));
         openTheme.setOnAction(e -> openFolder(Packs.themeDir()));
-        HBox actions = new HBox(8, openLang, openTheme);
+        Button rescanTheme = new Button(I18n.t("settings.theme_refresh"));
+        rescanTheme.setOnAction(e -> {
+            com.brisklauncher.mcl.setting.ThemePacks.invalidate();
+            reloadThemes();
+        });
+        HBox actions = new HBox(8, openLang, openTheme, rescanTheme);
         grid.addRow(2, new Label(""), actions);
         HBox.setHgrow(language, Priority.ALWAYS);
         HBox.setHgrow(theme, Priority.ALWAYS);
         Label hint = UiKit.catHint(I18n.t("settings.packs_hint"));
         hint.setWrapText(true);
-        return card(I18n.t("settings.section.appearance"), new VBox(8, grid, hint));
+        return card(I18n.t("settings.section.appearance"),
+                new VBox(8, grid, themeInfo, hint));
+    }
+
+    // ---------- 主题包 ----------
+
+    /** 填下拉 + 接上「切换 / 说明 / 缩图」逻辑（只需要做一次）。 */
+    private void initThemeSection() {
+        themeDesc.getStyleClass().add("cat-hint");
+        themeDesc.setWrapText(true);
+        themeMeta.getStyleClass().add("cat-hint");
+        themeWarnings.getStyleClass().add("cat-hint");
+        themeWarnings.setWrapText(true);
+        themeWarnings.setStyle("-fx-text-fill: -brisk-warning;");
+        themePreview.setFitWidth(132);
+        themePreview.setFitHeight(74);
+        themePreview.setPreserveRatio(true);
+        themePreview.setSmooth(true);
+        themePreview.setVisible(false);
+        themePreview.setManaged(false);
+        themeInfo.getChildren().setAll(themePreview, themeDesc, themeMeta, themeWarnings);
+        themeInfo.setVisible(false);
+        themeInfo.setManaged(false);
+
+        reloadThemes();
+        theme.valueProperty().addListener((obs, oldValue, value) -> {
+            if (value == null) {
+                return;
+            }
+            for (com.brisklauncher.mcl.setting.ThemePacks.Theme candidate
+                    : com.brisklauncher.mcl.setting.ThemePacks.all()) {
+                if (candidate.displayName().equals(value)) {
+                    com.brisklauncher.mcl.setting.ThemePacks.setCurrent(candidate.id());
+                    // 热重载：样式 + 背景 + 圆角一次刷新，不用重启
+                    com.brisklauncher.mcl.MclApplication.refreshTheme(getScene());
+                    refreshThemeDetails(candidate);
+                    // 原生啟動圖也要跟著換（背景畫，下次啟動就是這個主題的顏色）
+                    com.brisklauncher.mcl.ui.NativeSplashService.ensureUpToDateAsync();
+                    return;
+                }
+            }
+        });
+    }
+
+    /** 重新扫一遍主题目录并重建下拉（保留当前选择）。 */
+    private void reloadThemes() {
+        var themes = com.brisklauncher.mcl.setting.ThemePacks.all();
+        theme.getItems().clear();
+        for (var item : themes) {
+            theme.getItems().add(item.displayName());
+        }
+        String currentId = com.brisklauncher.mcl.setting.ThemePacks.currentId();
+        var current = themes.stream().filter(item -> item.id().equals(currentId))
+                .findFirst().orElse(themes.get(0));
+        theme.getSelectionModel().select(current.displayName());
+        refreshThemeDetails(current);
+    }
+
+    /** 缩图（存在才显示）+ 说明 + 作者/版本 + 安全警告。 */
+    private void refreshThemeDetails(com.brisklauncher.mcl.setting.ThemePacks.Theme selected) {
+        if (selected == null) {
+            return;
+        }
+        boolean builtin = com.brisklauncher.mcl.setting.ThemePacks.DEFAULT_ID.equals(selected.id());
+        themeInfo.setVisible(!builtin);
+        themeInfo.setManaged(!builtin);
+        if (builtin) {
+            return;
+        }
+        String description = selected.description();
+        themeDesc.setText(description == null || description.isBlank()
+                ? I18n.t("settings.theme_none") : description);
+        themeMeta.setText(I18n.t("settings.theme_by",
+                selected.author().isBlank() ? "-" : selected.author(),
+                selected.version().isBlank() ? "-" : selected.version())
+                + (selected.dark() ? " · 🌙" : " · ☀️"));
+        if (selected.warnings().isEmpty()) {
+            themeWarnings.setVisible(false);
+            themeWarnings.setManaged(false);
+        } else {
+            themeWarnings.setVisible(true);
+            themeWarnings.setManaged(true);
+            themeWarnings.setText(I18n.t("settings.theme_warnings",
+                    String.join("；", selected.warnings())));
+        }
+        // 缩图按 2 倍显示尺寸解码（132×74 → 264×148），省内存也省时间
+        javafx.scene.image.Image preview = selected.preview() == null ? null
+                : com.brisklauncher.mcl.security.GuardedImages.fromFile(
+                        selected.preview(), 264, 148, true, false);
+        if (preview == null) {
+            themePreview.setImage(null);
+            themePreview.setVisible(false);
+            themePreview.setManaged(false);
+        } else {
+            themePreview.setImage(preview);
+            themePreview.setVisible(true);
+            themePreview.setManaged(true);
+        }
     }
     private VBox networkCard() {
         Label thirdPartyNote = UiKit.catHint(I18n.t("settings.third_party_note"));
@@ -211,13 +300,18 @@ public final class SettingsPage extends VBox implements MclPage {
         });
         grid.addRow(1, new Label(""), insecureTls);
         grid.addRow(2, new Label(I18n.t("settings.microsoft_client_id")), microsoftClientId);
+        microsoftClientIdSource.getStyleClass().add("cat-hint");
+        microsoftClientIdSource.setWrapText(true);
+        grid.addRow(3, new Label(""), microsoftClientIdSource);
+        // 边打字边更新「当前生效」，不用先保存
+        microsoftClientId.textProperty().addListener((obs, oldValue, newValue) -> refreshClientIdSource());
         Button help = new Button(I18n.t("settings.microsoft_client_help"));
         help.setOnAction(e -> DesktopActions.openUrl("https://minecraft.wiki/w/Microsoft_authentication"));
         Button azure = new Button(I18n.t("settings.microsoft_client_azure"));
         azure.setOnAction(e -> DesktopActions.openUrl(
                 "https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/CreateApplicationBlade"));
         HBox clientHelp = new HBox(8, help, azure);
-        grid.addRow(3, new Label(""), clientHelp);
+        grid.addRow(4, new Label(""), clientHelp);
         HBox.setHgrow(proxy, Priority.ALWAYS);
         HBox.setHgrow(microsoftClientId, Priority.ALWAYS);
         Label hint = UiKit.catHint(I18n.t("settings.microsoft_client_hint"));
@@ -254,7 +348,8 @@ public final class SettingsPage extends VBox implements MclPage {
         updateChannel.setValue("GitHub");
         GridPane grid = grid();
         grid.addRow(0, new Label(""), autoUpdate);
-        grid.addRow(1, new Label(I18n.t("update.channel")), updateChannel);
+        grid.addRow(1, new Label(""), autoInstall);
+        grid.addRow(2, new Label(I18n.t("update.channel")), updateChannel);
         Button check = new Button(I18n.t("update.check_now"));
         check.setOnAction(e -> checkUpdateNow());
         Label version = new Label(I18n.t("update.current_version",
@@ -292,15 +387,9 @@ public final class SettingsPage extends VBox implements MclPage {
                         release.version()));
                 return;
             }
-            String notes = release.notes() == null ? "" : release.notes();
-            if (notes.length() > 500) {
-                notes = notes.substring(0, 500) + "…";
-            }
-            String body = I18n.t("update.available_body", release.version(),
-                    com.brisklauncher.mcl.update.UpdateService.CURRENT_VERSION, notes);
-            Platform.runLater(() -> MCLDialog.confirm(getScene().getWindow(),
-                    I18n.t("update.available_title"), body,
-                    () -> DesktopActions.openUrl(release.pageUrl())));
+            // 有新版：走自动覆盖更新流程（下载 → 覆盖 → 重启），不再只开下载页
+            Platform.runLater(() -> com.brisklauncher.mcl.ui.UpdateFlow.offer(
+                    getScene().getWindow(), context, release, true));
         });
     }
 
@@ -401,8 +490,17 @@ public final class SettingsPage extends VBox implements MclPage {
         frpPath.setText(settings.frpPath());
         autoLanguage.setSelected(settings.autoLanguage());
         microsoftClientId.setText(settings.microsoftClientId());
+        refreshClientIdSource();
         autoUpdate.setSelected(settings.autoUpdate());
+        autoInstall.setSelected(settings.autoInstallUpdate());
         updateChannel.setValue("gitee".equalsIgnoreCase(settings.updateChannel()) ? "Gitee" : "GitHub");
+    }
+
+    /** 更新「当前生效」提示：ID 是设置页填的、构建内置的、还是环境变量来的。 */
+    private void refreshClientIdSource() {
+        String mode = com.brisklauncher.mcl.util.MsClientId.source(microsoftClientId.getText());
+        microsoftClientIdSource.setText(I18n.t("settings.microsoft_client_source",
+                I18n.t("settings.microsoft_client_source." + mode)));
     }
 
     /** 自訂下載源是高風險設定：首次保存時明確告知「該伺服器能決定你下載到什麼」。 */
@@ -465,6 +563,7 @@ public final class SettingsPage extends VBox implements MclPage {
                 insecureTls.isSelected(),
                 microsoftClientId.getText() == null ? "" : microsoftClientId.getText().trim(),
                 autoUpdate.isSelected(),
+                autoInstall.isSelected(),
                 "Gitee".equalsIgnoreCase(updateChannel.getValue()) ? "gitee" : "github",
                 com.brisklauncher.mcl.setting.LauncherSettings.DEFAULT_UPDATE_REPO);
     }

@@ -1,8 +1,8 @@
 package com.brisklauncher.mcl.plugin.builtin;
 
 import com.brisklauncher.mcl.i18n.I18n;
-import com.brisklauncher.mcl.plugin.LauncherPlugin;
-import com.brisklauncher.mcl.plugin.PluginContext;
+import com.brisklauncher.mcl.plugin.api.LauncherPlugin;
+import com.brisklauncher.mcl.plugin.api.PluginContext;
 import com.brisklauncher.mcl.ui.UiKit;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;

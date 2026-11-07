@@ -1,0 +1,22 @@
+{
+  "name": {
+    "zh_CN": "高对比",
+    "zh_TW": "高對比",
+    "zh_HK": "高對比",
+    "en_US": "High contrast"
+  },
+  "description": {
+    "zh_CN": "纯白底 + 近黑文字 + 加粗边框 + 深蓝主色，按 WCAG 的对比思路做。",
+    "zh_TW": "純白底 + 近黑文字 + 加粗邊框 + 深藍主色，按 WCAG 的對比思路做。",
+    "zh_HK": "純白底 + 近黑文字 + 加粗邊框 + 深藍主色，按 WCAG 的對比思路做。",
+    "en_US": "Pure white, near-black text, thick borders and a deep blue accent."
+  },
+  "author": "Brisk Launcher",
+  "version": "1.0.0",
+  "base": "light",
+  "accent": "#003C96",
+  "wordmark": true,
+  "backgroundFit": "cover",
+  "backgroundDim": 0.0,
+  "bundled": true
+}

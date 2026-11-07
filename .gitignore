@@ -4,6 +4,10 @@ target/
 out/
 *.class
 
+# ---------- 示例插件的构建产物 ----------
+examples/**/out/
+examples/**/*.jar
+
 # ---------- 缓存 / 工具 ----------
 .cache/
 .gradle/
@@ -23,10 +27,12 @@ local/
 
 # ---------- 运行期数据（绝不提交） ----------
 data/
-logs/
-themes/
-lang/
-plugins/
+# 只有「安装根目录」的这幾個資料夾是執行期資料；不能寫成 `themes/`，
+# 否則會連 src/main/resources/themes（內建主題）一起被忽略。
+/logs/
+/themes/
+/lang/
+/plugins/
 secret.key
 accounts.json
 accounts-local.json
@@ -39,10 +45,14 @@ instances.json
 *.tmp
 *.part
 
-# ---------- 敏感：微软客户端 ID ----------
-# 本地用 ClientIdEncoder 生成后填入下面这个文件；它不入库，示例文件入库
+# ---------- 敏感：微软客户端 ID（构建期注入） ----------
+# 真实值放 config/client-id.properties（不入库）；样例文件 client-id.properties.example 入库且留空。
+# 构建时由 gradle 的 generateBuildInfo 写进 jar 内的 assets/brisk-build.properties。
+# 历史遗留（旧方案）也一起挡住，避免哪天又被塞回来：
+config/client-id.properties
+config/*.local.properties
+!config/client-id.properties.example
 src/main/java/com/brisklauncher/mcl/auth/impl/MicrosoftClientIdLocal.java
-!src/main/java/com/brisklauncher/mcl/auth/impl/MicrosoftClientIdLocal.java.example
 microsoft-client-id.txt
 *.key
 *.p12

@@ -1,0 +1,23 @@
+{
+  "name": {
+    "zh_CN": "樱花",
+    "zh_TW": "櫻花",
+    "zh_HK": "櫻花",
+    "en_US": "Sakura"
+  },
+  "description": {
+    "zh_CN": "粉色系浅色主题：浅粉底 + 玫瑰红主色，只改设计变量。",
+    "zh_TW": "粉色系淺色主題：淺粉底 + 玫瑰紅主色，只改設計變數。",
+    "zh_HK": "粉色系淺色主題：淺粉底 + 玫瑰紅主色，只改設計變數。",
+    "en_US": "A pink light theme built purely from design tokens."
+  },
+  "author": "Brisk Launcher",
+  "version": "1.0.0",
+  "base": "light",
+  "accent": "#D94A75",
+  "logo": "logo.png",
+  "wordmark": true,
+  "backgroundFit": "cover",
+  "backgroundDim": 0.0,
+  "bundled": true
+}

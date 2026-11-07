@@ -29,7 +29,7 @@ public final class AccountStore {
     private final ObjectMapper mapper = new ObjectMapper();
 
     public AccountStore() {
-        this(AppPaths.launcherRoot().resolve("accounts.json"));
+        this(AppPaths.accountsFile());
     }
 
     public AccountStore(Path file) {

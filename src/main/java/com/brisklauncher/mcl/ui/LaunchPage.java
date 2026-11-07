@@ -115,7 +115,8 @@ public final class LaunchPage extends HBox implements MclPage {
         accountUnsubscribe = context.accounts().addChangeListener(() ->
                 Platform.runLater(this::updateSkinTarget));
         iconUnsubscribe = context.addIconChangeListener(() -> Platform.runLater(this::reload));
-        reload();
+        // 首次填資料交給 onShown：MclApplication 會在「主窗口畫出來之後」的下一個脈衝呼叫，
+        // 這樣視窗出現不必等掃完 versions/ 與實例設定（實測省 0.5～0.8 秒）。
         // 开发期：启动页一出现就自动启动目前选中的实例（回归验证启动链路/时间线用）
         if (System.getProperty("mcl.dev.autolaunch") != null) {
             Platform.runLater(this::launchSelected);
@@ -131,6 +132,30 @@ public final class LaunchPage extends HBox implements MclPage {
 
     // ---------- 左侧：实例列表 ----------
 
+    /**
+     * 下拉里显示的路径尾巴：前面用 … 代替。
+     *
+     * <p>如果最后一层目录名跟显示名一样（{@code minecraft} 对 {@code ...\minecraft}），
+     * 就只显示上一层，避免「minecraft · …\xxx\minecraft」这种重复 + 截断。
+     */
+    private static String shortPath(java.nio.file.Path path, String displayName) {
+        if (path == null) {
+            return "";
+        }
+        java.nio.file.Path file = path.getFileName();
+        java.nio.file.Path parent = path.getParent();
+        java.nio.file.Path parentName = parent == null ? null : parent.getFileName();
+        String leaf = file == null ? "" : file.toString();
+        String up = parentName == null ? "" : parentName.toString();
+        if (!leaf.isEmpty() && leaf.equalsIgnoreCase(displayName == null ? "" : displayName)) {
+            return up.isEmpty() ? "…" : "…\\" + up;
+        }
+        if (up.isEmpty()) {
+            return leaf;
+        }
+        return "…\\" + up + "\\" + leaf;
+    }
+
     private VBox buildLeft() {
         VBox left = new VBox(10);
         left.setPrefWidth(330);
@@ -142,7 +167,10 @@ public final class LaunchPage extends HBox implements MclPage {
             @Override
             protected void updateItem(GameDirectory root, boolean empty) {
                 super.updateItem(root, empty);
-                setText(empty || root == null ? null : root.displayName());
+                // 名称后面带上对应路径：玩家经常有好几个 .minecraft，光看名字分不出来。
+                // 完整路径太长会被截成 "E:\code\Bri…"，所以这里只留最后两段（tooltip 里是完整路径）。
+                setText(empty || root == null ? null
+                        : root.displayName() + "  ·  " + shortPath(root.path(), root.displayName()));
                 setTooltip(empty || root == null ? null : new Tooltip(root.path().toString()));
                 // 大版本文件夹图标（可自订，见 GameIcons；没有就显示彩色资料夹占位图）
                 setGraphic(empty || root == null ? null : VersionIconView.of(root, 20));

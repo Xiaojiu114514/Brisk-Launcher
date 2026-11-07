@@ -155,12 +155,15 @@ public final class ModLoaderInstaller {
      */
     private String fetchInstallerSha1(URI installerUrl, String what) {
         String base = installerUrl.toString();
-        String[] candidates = {
-                base + ".sha1",
-                base.replace("https://bmclapi2.bangbang93.com/maven/net/neoforged/neoforge/",
-                        "https://maven.neoforged.net/releases/net/neoforged/neoforge/") + ".sha1",
-                base.replace("https://bmclapi2.bangbang93.com/maven/net/minecraftforge/",
-                        "https://maven.minecraftforge.net/") + ".sha1"};
+        // 候选和安装器本身完全一致（镜像 → 备用镜像 → 官方），只是加上 .sha1 后缀。
+        // BMCLAPI 不提供 .sha1，所以官方那条几乎总是兜底的来源。
+        java.util.List<String> candidates = new java.util.ArrayList<>();
+        for (URI uri : mirrors.resolve(installerUrl)) {
+            candidates.add(uri + ".sha1");
+        }
+        if (candidates.isEmpty()) {
+            candidates.add(base + ".sha1");
+        }
         for (String candidate : candidates) {
             try {
                 String text = Http.getString(URI.create(candidate), Duration.ofSeconds(30)).trim();
@@ -246,8 +249,12 @@ public final class ModLoaderInstaller {
         // 安全审计 M5：安装器是要 `java -jar` 执行的，必须先取 .sha1 并校验
         String sha1 = fetchInstallerSha1(installerUrl, "Forge " + forgeVersion);
         progress.accept(new InstallProgress(InstallProgress.Stage.LOADER, 0.1, "Forge " + forgeVersion));
-        downloader.downloadOne(new DownloadTask(mirrors.resolve(installerUrl.toString()),
-                installerJar, sha1, -1L));
+        java.util.List<URI> installerSources = mirrors.resolve(installerUrl.toString());
+        try {
+            downloader.downloadOne(new DownloadTask(installerSources, installerJar, sha1, -1L));
+        } catch (RuntimeException error) {
+            throw installerUnavailable("Forge " + forgeVersion, installerSources, error);
+        }
 
         Set<String> before = installedIds(root);
         runInstallerWithRetry(root, installerJar, JavaVersionMapper.forMinecraft(mcVersion),
@@ -274,8 +281,12 @@ public final class ModLoaderInstaller {
         String sha1 = fetchInstallerSha1(installerUrl, "NeoForge " + neoforgeVersion);
         progress.accept(new InstallProgress(InstallProgress.Stage.LOADER, 0.1,
                 "NeoForge " + neoforgeVersion));
-        downloader.downloadOne(new DownloadTask(mirrors.resolve(installerUrl.toString()),
-                installerJar, sha1, -1L));
+        java.util.List<URI> installerSources = mirrors.resolve(installerUrl.toString());
+        try {
+            downloader.downloadOne(new DownloadTask(installerSources, installerJar, sha1, -1L));
+        } catch (RuntimeException error) {
+            throw installerUnavailable("NeoForge " + neoforgeVersion, installerSources, error);
+        }
 
         Set<String> before = installedIds(root);
         runInstallerWithRetry(root, installerJar, JavaVersionMapper.forMinecraft(mcVersion),
@@ -570,7 +581,40 @@ public final class ModLoaderInstaller {
                 + "（安装器原始日志通常在同目录的 *.jar.log）");
     }
 
-    /** 安裝器用的 Java：本機有就用，沒有就自動補齊（沿用 JavaManager.ensureFor）。 */
+    /**
+      * 安装器下载失败时把「为什么」说清楚。
+      *
+      * <p>实测：NeoForge 的 beta 版本（例如 26.3.0.0-beta）官方会立刻发到 maven，
+      * 但 BMCLAPI 镜像要滞后一段时间（甚至不镜像 beta），官方 maven 在国内又连不上。
+      * 只报一句 HTTP 404 完全看不懂 —— 这里写明试过哪些来源、该怎么办。
+      */
+     private InstallException installerUnavailable(String label, java.util.List<URI> sources,
+                                                   RuntimeException cause) {
+         java.util.List<String> hosts = new java.util.ArrayList<>();
+         for (URI uri : sources) {
+             String host = uri == null ? null : uri.getHost();
+             if (host != null && !hosts.contains(host)) {
+                 hosts.add(host);
+             }
+         }
+         String hint = label != null && label.toLowerCase(Locale.ROOT).contains("beta")
+                 ? com.brisklauncher.mcl.i18n.I18n.t("install.installer_beta_hint")
+                 : com.brisklauncher.mcl.i18n.I18n.t("install.installer_hint");
+         // 把完整地址也写出来：玩家可以直接粘到浏览器里，一眼看出是 404 还是网络不通，
+         // 也方便判断到底是「镜像没同步」还是「我们拼错了」。
+         java.util.List<String> urls = new java.util.ArrayList<>();
+         for (URI uri : sources) {
+             if (uri != null) {
+                 urls.add(uri.toString());
+             }
+         }
+         return new InstallException(com.brisklauncher.mcl.i18n.I18n.t(
+                 "install.installer_unavailable", label,
+                 String.join("\n", urls) + (hosts.isEmpty() ? "" : "\n(" + String.join(" / ", hosts) + ")"),
+                 hint), cause);
+     }
+
+     /** 安裝器用的 Java：本機有就用，沒有就自動補齊（沿用 JavaManager.ensureFor）。 */
     private void ensureInstallerJava(int major, String label, Consumer<InstallProgress> progress) {
         Optional<JdkInfo> existing = javaManager.findBest(major);
         if (existing.isPresent()) {
@@ -971,10 +1015,49 @@ public final class ModLoaderInstaller {
         command.add(mirrors.installerMavenMirror());
         // mojmaps 已由我们抓好 → 让驱动移除 DOWNLOAD_MOJMAPS；没抓好就保留它自己去下载
         command.add(dropMojmaps ? "drop-mojmaps" : "keep-mojmaps");
+        String mirror = mirrors.installerMavenMirror();
         SafeLog.info("[loader] " + label + " 安装器以无界面驱动执行（镜像："
-                + (mirrors.installerMavenMirror().isBlank() ? "官方" : mirrors.installerMavenMirror())
+                + (mirror.isBlank() ? "官方" : mirror)
                 + "，mojmaps：" + (dropMojmaps ? "已预取" : "交给安装器") + "）");
-        return runProcess(command, root, progress, label, lineConsumer, 20);
+        // C) 安装器自己下载依赖库时**没有回退机制**：镜像缺某个构件就整轮失败（典型是 HTTP 404）。
+        // 这里按「主镜像 → 备用镜像 → 官方 maven」依次换 mirror 参数重跑，
+        // 任何一轮成功就结束；都不行才把最后的退出码交回去。
+        java.util.List<String> mavenMirrors = new java.util.ArrayList<>();
+        if (!mirror.isBlank()) {
+            mavenMirrors.add(mirror);
+            String alt = mirror.replace("https://bmclapi2.bangbang93.com",
+                    "https://bmclapi.bangbang93.com");
+            if (!alt.equals(mirror)) {
+                mavenMirrors.add(alt);
+            }
+        }
+        mavenMirrors.add("");   // 空 = 不覆写 mirror，直接用官方 maven
+        int code = 0;
+        for (int round = 0; round < mavenMirrors.size(); round++) {
+            String chosen = mavenMirrors.get(round);
+            java.util.List<String> attempt = new java.util.ArrayList<>(command);
+            int index = attempt.indexOf(mirror.isBlank() ? "" : mirror);
+            if (index < 0) {
+                // 找不到 mirror 参数就不要乱改，直接跑原始命令
+                attempt = new java.util.ArrayList<>(command);
+            } else {
+                attempt.set(index, chosen);
+            }
+            code = runProcess(attempt, root, progress, label, lineConsumer, 20);
+            if (code == 0) {
+                if (round > 0) {
+                    SafeLog.info("[loader] " + label + " 安装器在「"
+                            + (chosen.isBlank() ? "官方 maven" : chosen) + "」下成功");
+                }
+                return 0;
+            }
+            if (round + 1 < mavenMirrors.size()) {
+                SafeLog.warn("[loader] " + label + " 安装器在「"
+                        + (chosen.isBlank() ? "官方 maven" : chosen) + "」下失败（退出码 " + code
+                        + "），改下一个来源再试");
+            }
+        }
+        return code;
     }
 
     /** 舊方式：{@code java -jar installer.jar --installClient}（只在驅動不支援時用）。 */

@@ -25,6 +25,7 @@ import javafx.stage.StageStyle;
 import javafx.stage.Window;
 
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.function.Consumer;
@@ -66,7 +67,7 @@ public final class InstallVersionDialog {
         dialog.setTitle(I18n.t("install.dialog.title"));
 
         Label title = new Label(I18n.t("install.dialog.title") + (version.isBlank() ? "" : " · " + version));
-        title.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #14453F;");
+        title.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: -brisk-text;");
         Button close = UiKit.closeButtonStyled();
         close.getStyleClass().addAll("window-button", "window-close");
         close.setOnAction(e -> dialog.close());
@@ -166,7 +167,8 @@ public final class InstallVersionDialog {
                             setText(null);
                             return;
                         }
-                        setText(item.stable() ? item.version() : item.version() + "  (beta)");
+                        // 只显示版本号：beta 也一样列出来，但不再打 "(beta)" 字样
+                        setText(item.version());
                     }
                 };
         loaderVersionCombo.setCellFactory(loaderCell);
@@ -267,7 +269,9 @@ public final class InstallVersionDialog {
                     SafeLog.warn("[loader] " + selected + " 清单失败：" + error);
                     versions = List.of();
                 }
-                List<LoaderMetaClient.LoaderVersion> loaded = versions;
+                // 新的在前（这里直接拿 loaderMeta 的原始顺序，之前没排序）
+                List<LoaderMetaClient.LoaderVersion> loaded = new ArrayList<>(versions);
+                loaded.sort((a, b) -> LoaderMetaClient.compareVersionsDescending(b.version(), a.version()));
                 SafeLog.info("[loader] " + selected + " 版本清单：" + loaded.size() + " 笔");
                 Platform.runLater(() -> {
                     loaderVersionCombo.getItems().setAll(loaded);
@@ -377,8 +381,8 @@ public final class InstallVersionDialog {
                 fabricApi, fabricApiCombo, optifine, optifineCombo,
                 status, actions);
         root.setPadding(new Insets(16));
-        root.setStyle("-fx-background-color: #F4FCFA; -fx-background-radius: 12;"
-                + " -fx-border-color: #BFE9E2; -fx-border-radius: 12;");
+        root.setStyle("-fx-background-color: -brisk-bg; -fx-background-radius: 12;"
+                + " -fx-border-color: -brisk-border; -fx-border-radius: 12;");
         root.setPrefWidth(520);
 
         start.setOnAction(e -> {

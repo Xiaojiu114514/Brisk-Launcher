@@ -4,12 +4,20 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 
 /**
- * 轻度混淆：给「不便公开但又不是密码」的常量（例如微软客户端 ID）用。
+ * 轻度混淆：给「不便公开但又不是密码」的常量用。
  *
- * <p>不做加密学意义上的安全承诺——客户端 ID 在运行期必然要出现在内存里；
- * 这里只是让 {@code strings}/{@code javap -c} 之类的手段**拿不到明文**，
- * 防止随手反编译就抄走。真正的机密（client secret）本项目不用。
+ * <p><b>已停止使用，仅保留用于兼容旧配置</b>（{@code launcher.json} 或环境变量里
+ * 可能还存着 {@code enc:} 串）。新代码不要再产生这种形态：
+ * 盐固定在源码里、解码器也可从同一仓库取得，所以它<strong>不提供任何保密性</strong>，
+ * 只能挡住随手 grep。微软客户端 ID 现在的做法是「承认公开 + 构建期内联明文」（见
+ * {@code config/client-id.properties.example} 的说明）。
+ *
+ * <p>为什么不做加密学意义上的安全承诺：客户端 ID 在运行期必然要出现在内存与网络请求里，
+ * 任何本地加密都挡不住同机的进程。真正的机密（client secret）本项目不用。
+ *
+ * @deprecated 混淆不提供保密性；读取路径只保留给旧配置做兼容，2~3 个版本后移除。
  */
+@Deprecated(forRemoval = true)
 public final class Obfuscated {
 
     /** 混淆后的前缀；解析时见到它就解码。 */
