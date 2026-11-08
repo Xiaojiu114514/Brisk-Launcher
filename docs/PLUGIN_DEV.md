@@ -2,9 +2,9 @@
 
 **English** · [简体中文 ↓](#简体中文) · [繁體中文 ↓](#繁體中文)
 
-[← Back to README](README.md) · [简体中文 README](README.zh-CN.md) · [繁體中文 README](README.zh-TW.md)
+[← Back to README](../README.md) · [简体中文 README](README.zh-CN.md) · [繁體中文 README](README.zh-TW.md)
 
-> Working sample: [`examples/hello-plugin/`](examples/hello-plugin/) — tool panel, navigation page,
+> Working sample: [`examples/hello-plugin/`](../examples/hello-plugin/) — tool panel, navigation page,
 > language pack, config, services. Build it with `build.ps1`, drop the jar in `data\plugins\`, done.
 >
 > API version: **2** (`com.brisklauncher.mcl.plugin.api.PluginApi.VERSION`)
@@ -1099,4 +1099,4 @@ java -cp "target\classes;build\install\brisk-launcher\lib\*" ^
 
 ## License
 
-Plugins are your own work. The launcher is licensed under the terms in [LICENSE](LICENSE).
+Plugins are your own work. The launcher is licensed under the terms in [LICENSE](../LICENSE).

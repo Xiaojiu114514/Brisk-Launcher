@@ -47,6 +47,24 @@ public final class TaskDialog {
       detailLabel.getStyleClass().add("cat-hint");
       detailLabel.setWrapText(true);
       detailLabel.setMaxWidth((double)420.0F);
+      // HMCL 风格的阶段列表：每个阶段一行，已完成的打勾、当前的显示箭头、未开始的灰着
+      final InstallProgress.Stage[] stageOrder = {
+              InstallProgress.Stage.RESOLVING,
+              InstallProgress.Stage.VERSION_JSON,
+              InstallProgress.Stage.CLIENT_JAR,
+              InstallProgress.Stage.LIBRARIES,
+              InstallProgress.Stage.ASSETS,
+              InstallProgress.Stage.LOGGING,
+              InstallProgress.Stage.FINISHING,
+      };
+      final Label[] stageRows = new Label[stageOrder.length];
+      VBox stageList = new VBox((double)2.0F);
+      for (int i = 0; i < stageOrder.length; i++) {
+         Label row = new Label();
+         row.getStyleClass().add("cat-hint");
+         stageRows[i] = row;
+         stageList.getChildren().add(row);
+      }
       final ProgressBar bar = new ProgressBar((double)-1.0F);
       bar.setMaxWidth(Double.MAX_VALUE);
       bar.getStyleClass().add("startup-progress");
@@ -56,10 +74,10 @@ public final class TaskDialog {
       cancel.getStyleClass().add("button");
       HBox footer = new HBox((double)8.0F, new Node[]{spacer, cancel});
       footer.setAlignment(Pos.CENTER_RIGHT);
-      VBox root = new VBox((double)10.0F, new Node[]{titleLabel, stageLabel, bar, detailLabel, footer});
+      VBox root = new VBox((double)10.0F, new Node[]{titleLabel, stageLabel, bar, stageList, detailLabel, footer});
       root.setPadding(new Insets((double)20.0F));
       root.setStyle("-fx-background-color: -brisk-bg; -fx-background-radius: 12; -fx-border-color: -brisk-border; -fx-border-radius: 12;");
-      Scene scene = new Scene(root, (double)480.0F, (double)210.0F);
+      Scene scene = new Scene(root, (double)480.0F, (double)300.0F);
       UiKit.applyTheme(scene);
       scene.setFill(Color.TRANSPARENT);
       dialog.setScene(scene);
@@ -69,8 +87,37 @@ public final class TaskDialog {
       TaskExecutor.run(task, new TaskListener<T>() {
          public void onProgress(InstallProgress progress) {
             bar.setProgress(progress.progress() < (double)0.0F ? (double)-1.0F : progress.progress());
-            stageLabel.setText(TaskDialog.stageText(progress.stage()));
+            String stage = TaskDialog.stageText(progress.stage());
+            // 有明确进度时把百分比写在阶段右边，玩家一眼能看出还剩多少
+            if (progress.progress() >= 0 && progress.progress() <= 1 && progress.stage() != InstallProgress.Stage.DONE) {
+                stage = stage + "   " + progress.percent() + "%";
+            }
+            stageLabel.setText(stage);
             detailLabel.setText(progress.detail() == null ? "" : progress.detail());
+            // 阶段列表：已过的打 ✓，当前的用 ▶ 并加粗风格，未来的留空
+            int currentIndex = -1;
+            for (int i = 0; i < stageOrder.length; i++) {
+               if (stageOrder[i] == progress.stage()) {
+                  currentIndex = i;
+                  break;
+               }
+            }
+            if (progress.stage() == InstallProgress.Stage.DONE) {
+               currentIndex = stageOrder.length;
+            }
+            for (int i = 0; i < stageRows.length; i++) {
+               String name = TaskDialog.stageText(stageOrder[i]);
+               if (currentIndex >= stageOrder.length || i < currentIndex) {
+                  stageRows[i].setText("✓  " + name);
+                  stageRows[i].setOpacity(0.55);
+               } else if (i == currentIndex) {
+                  stageRows[i].setText("▶  " + name);
+                  stageRows[i].setOpacity(1.0);
+               } else {
+                  stageRows[i].setText("·  " + name);
+                  stageRows[i].setOpacity(0.45);
+               }
+            }
          }
 
          public void onSucceeded(T result) {

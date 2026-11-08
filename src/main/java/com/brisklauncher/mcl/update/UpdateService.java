@@ -31,7 +31,7 @@ import java.util.function.Consumer;
 public final class UpdateService {
 
     /** 目前版本（與 build.gradle / pom.xml 保持一致）。 */
-    public static final String CURRENT_VERSION = "1.1.0";
+    public static final String CURRENT_VERSION = "1.1.1";
 
     private static final Duration TIMEOUT = Duration.ofSeconds(20);
 

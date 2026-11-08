@@ -63,6 +63,9 @@ internal static class BriskBoot
         string libDir = Path.Combine(runtimeDir, "lib");
         Directory.CreateDirectory(libDir);
         Directory.CreateDirectory(dataDir);
+        // 临时目录也放在 exe 旁边：%TEMP% 不可写时（受限目录 / 安全软件）javax.imageio 会直接失败
+        string tempDir = Path.Combine(dataDir, "tmp");
+        Directory.CreateDirectory(tempDir);
         Directory.CreateDirectory(Path.Combine(exeDir, "minecraft", "versions"));
 
         SyncLibraries(libDir);
@@ -94,6 +97,7 @@ internal static class BriskBoot
         command.Append("-Dmcl.home=").Append(Quote(dataDir)).Append(' ');
         command.Append("-Dmcl.dataDir=").Append(Quote(dataDir)).Append(' ');
         command.Append("-Dmcl.appDir=").Append(Quote(exeDir)).Append(' ');
+        command.Append("-Djava.io.tmpdir=").Append(Quote(tempDir)).Append(' ');
         // 账号清单与凭据命名空间放 %LOCALAPPDATA%\BriskLauncher：
         // exe 随便换路径都能看到同一份账号（凭据管理器本来就是按 Windows 用户存的）
         string accountsDir = Path.Combine(

@@ -1,11 +1,11 @@
 module com.brisklauncher.mcl {
-    requires org.glavo.webp;
 
     requires java.logging;
     requires jdk.httpserver;
     requires java.management;
     requires java.net.http;
     requires java.desktop;
+    requires org.glavo.webp;
     // 插件 API 会暴露 JavaFX / Jackson 类型，所以对下游要 transitive
     requires transitive javafx.controls;
     requires transitive com.fasterxml.jackson.databind;

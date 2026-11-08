@@ -291,7 +291,19 @@ public final class SkinPreview3D extends StackPane {
      */
     private static boolean isSlimSkin(java.nio.file.Path file) {
         try {
-            java.awt.image.BufferedImage image = javax.imageio.ImageIO.read(file.toFile());
+            java.awt.image.BufferedImage image;
+            try (java.io.InputStream input = java.nio.file.Files.newInputStream(file)) {
+                // 关键：useCache=false —— 否则 ImageIO 会在 java.io.tmpdir 里建 imageio*.tmp，
+                // %TEMP% 不可写（受限账户 / 安全软件）时直接抛 AccessDeniedException。
+                try (javax.imageio.stream.ImageInputStream stream =
+                             new javax.imageio.stream.MemoryCacheImageInputStream(input)) {
+                    javax.imageio.ImageReader reader =
+                            javax.imageio.ImageIO.getImageReaders(stream).next();
+                    reader.setInput(stream, true, true);
+                    image = reader.read(0);
+                    reader.dispose();
+                }
+            }
             if (image == null || image.getWidth() < 64 || image.getHeight() < 64) {
                 return false;
             }

@@ -112,7 +112,17 @@ public final class MultiProgressDialog {
         java.util.Set<InstallProgress.Stage> doneStages = new java.util.LinkedHashSet<>();
         Label statusLine = new Label(I18n.t("install.status.preparing"));
         statusLine.getStyleClass().add("cat-hint");
-        statusLine.setWrapText(true);
+        // 左侧（阶段 + 当前文件）可以被截断，右侧（字节 / 速度 / 剩余）固定宽度右对齐，
+        // 这样文件名长短变化时右边那组数字不会左右乱跳。
+        statusLine.setTextOverrun(javafx.scene.control.OverrunStyle.ELLIPSIS);
+        statusLine.setMaxWidth(Double.MAX_VALUE);
+        Label statusRight = new Label("");
+        statusRight.getStyleClass().add("cat-hint");
+        statusRight.setMinWidth(250);
+        statusRight.setPrefWidth(250);
+        statusRight.setAlignment(Pos.CENTER_RIGHT);
+        HBox statusRow = new HBox(8, statusLine, statusRight);
+        HBox.setHgrow(statusLine, Priority.ALWAYS);
         VBox rows = new VBox(8);
         for (InstallProgress.Stage stage : ORDER) {
             Label name = new Label(stageName(stage));
@@ -157,7 +167,7 @@ public final class MultiProgressDialog {
             counts.put(stage, count);
         }
 
-        VBox root = new VBox(12, headerRow, statusLine, rows);
+        VBox root = new VBox(12, headerRow, statusRow, rows);
         root.setPadding(new Insets(16));
         root.setPrefWidth(560);
         root.setStyle("-fx-background-color: -brisk-bg; -fx-background-radius: 12;"
@@ -202,6 +212,17 @@ public final class MultiProgressDialog {
                 Label countLabel = counts.get(item.stage());
                 if (countLabel != null) {
                     int slash = text.indexOf('/');
+                    // 没有「数量」的阶段（版本 JSON / 客户端 / 收尾…）就显示百分比或 ✓，
+                    // 让每一行都能自己说明进度，不用靠猜。
+                    if (slash <= 0) {
+                        if (item.progress() >= 1.0) {
+                            countLabel.setText("✓");
+                        } else if (item.progress() > 0.001) {
+                            countLabel.setText(item.percent() + "%");
+                        } else {
+                            countLabel.setText("");
+                        }
+                    }
                     if (slash > 0) {
                         int space = text.indexOf(' ', slash);
                         countLabel.setText(space > 0 ? text.substring(0, space) : text);
@@ -210,8 +231,6 @@ public final class MultiProgressDialog {
                         if (text.startsWith("·")) {
                             text = text.substring(1).trim();
                         }
-                    } else {
-                        countLabel.setText("");
                     }
                 }
                 if (detail != null) {
@@ -225,9 +244,31 @@ public final class MultiProgressDialog {
                     if (!doneStages.contains(item.stage())) {
                         doneStages.add(item.stage());
                         statusLine.setText(I18n.t("install.status.stage_done", stageName(item.stage())));
+                        statusRight.setText("");
                     }
                 } else if (text != null && !text.isBlank()) {
-                    statusLine.setText(I18n.t("install.status.working", stageName(item.stage()), text));
+                    String left = text;
+                    StringBuilder right = new StringBuilder();
+                    for (String segment : text.split(" · ")) {
+                        boolean numeric = segment.contains("MB/s")
+                                || segment.matches("\\d+(\\.\\d+)? / \\d+(\\.\\d+)? MB")
+                                || segment.startsWith("剩") || segment.endsWith(" left");
+                        if (numeric) {
+                            if (right.length() > 0) {
+                                right.append(" · ");
+                            }
+                            right.append(segment);
+                            if (left.endsWith(" · " + segment)) {
+                                left = left.substring(0, left.length() - segment.length() - 3);
+                            } else if (left.equals(segment)) {
+                                left = "";
+                            }
+                        }
+                    }
+                    statusLine.setText(left.isBlank()
+                            ? I18n.t("install.status.working", stageName(item.stage()), "")
+                            : I18n.t("install.status.working", stageName(item.stage()), left));
+                    statusRight.setText(right.toString());
                 }
             });
         };

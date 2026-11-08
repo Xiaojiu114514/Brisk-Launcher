@@ -1,6 +1,6 @@
 # Brisk Launcher
 
-**English** · [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md)
+**English** · [简体中文](docs/README.zh-CN.md) · [繁體中文](docs/README.zh-TW.md)
 
 A lightweight Minecraft: Java Edition launcher built with Java 21 + JavaFX. No telemetry, version
 isolation by default, multi-threaded downloads.
@@ -19,14 +19,14 @@ isolation by default, multi-threaded downloads.
 A plugin is a jar in `data\plugins\`. It can add a tool panel, a navigation page, its own language pack,
 its own config folder, services for other plugins, and even account (auth) providers.
 API reference, `plugin.json` format, lifecycle, packaging and a working sample:
-**[Plugin development guide →](PLUGIN_DEV.md)** · [sample plugin](examples/hello-plugin/)
+**[Plugin development guide →](docs/PLUGIN_DEV.md)** · [sample plugin](examples/hello-plugin/)
 
 ## Theme development
 
 Themes are CSS packs in `data\themes\` with an optional `theme.json` (multi-language name, multiple
 CSS files, background image with fit/dim, settings thumbnail). Three themes ship with the launcher
 (`night`, `sakura`, `contrast`) and switching is instant.
-**[Theme development guide →](THEME_DEV.md)** · [sample theme](examples/my-theme/)
+**[Theme development guide →](docs/THEME_DEV.md)** · [sample theme](examples/my-theme/)
 
 ## Requirements
 

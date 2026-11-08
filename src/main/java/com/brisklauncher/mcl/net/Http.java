@@ -38,7 +38,7 @@ import java.security.cert.X509Certificate;
 public final class Http {
 
     private static final String USER_AGENT =
-            "BriskLauncher/1.1.0 (Minecraft launcher; +https://github.com/brisklauncher/brisk-launcher)";
+            "BriskLauncher/1.1.1 (Minecraft launcher; +https://github.com/brisklauncher/brisk-launcher)";
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private static volatile HttpClient client;

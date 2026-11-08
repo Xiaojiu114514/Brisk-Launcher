@@ -2,11 +2,11 @@
 
 **English** · [简体中文 ↓](#简体中文) · [繁體中文 ↓](#繁體中文)
 
-[← Back to README](README.md) · [Plugin development guide](PLUGIN_DEV.md)
+[← Back to README](../README.md) · [Plugin development guide](PLUGIN_DEV.md)
 
 > Bundled themes: `data/themes/night`, `data/themes/sakura`, `data/themes/contrast`
 > (created on first launch — edit them freely, they are not overwritten).
-> Copy-ready sample: [`examples/my-theme/`](examples/my-theme/)
+> Copy-ready sample: [`examples/my-theme/`](../examples/my-theme/)
 >
 > Three moving parts: `theme.css` (+ optional extra CSS), `theme.json` (metadata & options),
 > optional `background.*` / `preview.png`.
@@ -792,4 +792,4 @@ theme.name();        // 目前語言的名字
 
 ## License
 
-Themes are your own work. The launcher is licensed under the terms in [LICENSE](LICENSE).
+Themes are your own work. The launcher is licensed under the terms in [LICENSE](../LICENSE).

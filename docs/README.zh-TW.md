@@ -1,6 +1,6 @@
 # Brisk Launcher · 繁體中文
 
-[English](README.md) · [简体中文](README.zh-CN.md) · **繁體中文**
+[English](../README.md) · [简体中文](README.zh-CN.md) · **繁體中文**
 
 以 Java 21 + JavaFX 撰寫的輕量 Minecraft Java 版啟動器。無遙測、預設版本隔離、多執行緒下載。
 
@@ -17,13 +17,13 @@
 
 外掛就是一個放在 `data\plugins\` 下的 jar，可以加工具面板、導覽頁、自己的語言包、自己的設定資料夾、
 給別的外掛用的服務，甚至帳號認證實作。API 參考、`plugin.json` 格式、生命週期、打包與可執行範例見
-**[外掛開發指南 →](PLUGIN_DEV.md)** · [範例外掛](examples/hello-plugin/)
+**[外掛開發指南 →](PLUGIN_DEV.md)** · [範例外掛](../examples/hello-plugin/)
 
 ## 主題開發
 
 主題就是 `data\themes\` 下的 CSS 包，可選 `theme.json`（多語言名稱、多份 CSS、背景圖與鋪法/壓暗、
 設定頁縮圖）。啟動器自帶三個主題（`night`、`sakura`、`contrast`），切換即時生效。
-**[主題開發指南 →](THEME_DEV.md)** · [範例主題](examples/my-theme/)
+**[主題開發指南 →](THEME_DEV.md)** · [範例主題](../examples/my-theme/)
 
 ## 環境需求
 
@@ -56,4 +56,4 @@ gradle bootExe
 帳號不在 `data/` 裡，所以把 exe 換到別的目錄執行也還是同一份帳號。
 ## 授權
 
-見 [LICENSE](LICENSE)。
+見 [LICENSE](../LICENSE)。

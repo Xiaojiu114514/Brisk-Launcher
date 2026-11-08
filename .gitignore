@@ -12,7 +12,6 @@ examples/**/*.jar
 .cache/
 .gradle/
 .gradle-cache/
-.work/
 local/
 
 # ---------- IDE ----------
@@ -72,3 +71,11 @@ dump-*.txt
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# ---------- 单 exe 运行期产物 ----------
+/runtime/  # 单 exe 释放的 jar
+/minecraft/  # 内置游戏目录
+instance-id.txt  # 账号实例 id
+plugin-trust.json  # 插件信任记录
+launcher.lock  # 启动器锁
+/data/tmp/  # 临时文件

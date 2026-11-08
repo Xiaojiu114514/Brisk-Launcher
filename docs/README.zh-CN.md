@@ -1,6 +1,6 @@
 # Brisk Launcher · 简体中文
 
-[English](README.md) · **简体中文** · [繁體中文](README.zh-TW.md)
+[English](../README.md) · **简体中文** · [繁體中文](README.zh-TW.md)
 
 基于 Java 21 + JavaFX 的轻量 Minecraft Java 版启动器。无遥测，默认版本隔离，多线程下载。
 
@@ -17,13 +17,13 @@
 
 插件就是一个放在 `data\plugins\` 下的 jar，可以加工具面板、导航页、自己的语言包、自己的配置目录、
 给别的插件用的服务，甚至账号认证实现。API 参考、`plugin.json` 格式、生命周期、打包与可运行示例见
-**[插件开发指南 →](PLUGIN_DEV.md)** · [示例插件](examples/hello-plugin/)
+**[插件开发指南 →](PLUGIN_DEV.md)** · [示例插件](../examples/hello-plugin/)
 
 ## 主题开发
 
 主题就是 `data\themes\` 下的 CSS 包，可选 `theme.json`（多语言名称、多份 CSS、背景图与铺法/压暗、
 设置页缩图）。启动器自带三个主题（`night`、`sakura`、`contrast`），切换即时生效。
-**[主题开发指南 →](THEME_DEV.md)** · [示例主题](examples/my-theme/)
+**[主题开发指南 →](THEME_DEV.md)** · [示例主题](../examples/my-theme/)
 
 ## 环境要求
 
@@ -56,4 +56,4 @@ gradle bootExe
 账号不在 `data/` 里，所以把 exe 换到别的目录运行也还是同一份账号。
 ## 许可证
 
-见 [LICENSE](LICENSE)。
+见 [LICENSE](../LICENSE)。

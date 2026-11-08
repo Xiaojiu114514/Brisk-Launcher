@@ -42,6 +42,15 @@ import java.util.function.Supplier;
  */
 public final class MclApplication extends Application {
 
+    static {
+        // ImageIO 默认把解码缓存写到 java.io.tmpdir；%TEMP% 不可写（受限目录/安全软件）
+        // 会抛 AccessDeniedException: ...\Temp\imageio*.tmp。改成纯内存缓存。
+        javax.imageio.ImageIO.setUseCache(false);
+        // %TEMP% 不可写时把 java.io.tmpdir 换到 data/tmp（和 HMCL 一样不依赖系统临时目录）
+        com.brisklauncher.mcl.security.TempGuard.ensureWritable();
+    }
+
+
     /** 目前執行的實例（給彈窗發起「跳頁 + 搜索」用，例如前置依賴圖的氣泡點擊）。 */
     private static MclApplication instance;
 

@@ -477,26 +477,59 @@ public final class VersionInstaller {
             return;
         }
         long startTime = System.currentTimeMillis();
-        double[] lastSpeed = {0};
+        // 速度用「滑动窗口 EMA」，不要用「总字节 / 总耗时」：
+        // 后者在批量下载时必然越算越低（早期小文件很快、后面大文件拖长时间），
+        // 玩家会以为下载在变慢，其实只是平均值在下降。
+        long[] prevBytes = {0};
+        long[] prevAt = {startTime};
+        double[] ema = {0};
         downloader.downloadAll(tasks, snapshot -> {
             long now = System.currentTimeMillis();
             long bytes = snapshot.bytesDone();
-            double elapsedSec = Math.max(0.2, (now - startTime) / 1000.0);
-            // 累计平均速度（不会因为两次回呼间隔太短就变 0）
-            double speed = bytes / 1024.0 / 1024.0 / elapsedSec;
-            if (speed > 0.02) {
-                lastSpeed[0] = speed;
-            } else if (lastSpeed[0] > 0) {
-                speed = lastSpeed[0];   // 停顿时保留上一个值，不要闪成空白
+            long deltaBytes = Math.max(0, bytes - prevBytes[0]);
+            long deltaMs = now - prevAt[0];
+            prevBytes[0] = bytes;
+            prevAt[0] = now;
+            double instant = deltaMs > 0 ? deltaBytes / 1048576.0 / (deltaMs / 1000.0) : 0;
+            if (deltaMs > 0 && instant > 0) {
+                // 0.7/0.3 的 EMA：既平滑又能跟上真实变化
+                ema[0] = ema[0] > 0 ? ema[0] * 0.7 + instant * 0.3 : instant;
             }
+            double speed = ema[0];
             String speedText = speed > 0.02
                     ? String.format(java.util.Locale.ROOT, "%.1f MB/s", speed) : "";
+            // 已下载 / 总量（字节）
+            long done = snapshot.bytesDone();
+            long totalBytes = snapshot.bytesTotal();
+            String bytesText = totalBytes > 0
+                    ? String.format(java.util.Locale.ROOT, "%.1f / %.1f MB",
+                            done / 1048576.0, totalBytes / 1048576.0)
+                    : "";
+            // 剩余时间：拿不到总量或速度太小时不显示，避免乱跳
+            String etaText = "";
+            if (totalBytes > done && speed > 0.05) {
+                long seconds = Math.max(1, Math.round((totalBytes - done) / 1048576.0 / speed));
+                String human = seconds >= 60
+                        ? (seconds / 60) + "m " + (seconds % 60) + "s"
+                        : seconds + "s";
+                etaText = com.brisklauncher.mcl.i18n.I18n.t("task.eta", human);
+            }
+            java.util.List<String> parts = new java.util.ArrayList<>();
             String detail = detailOf(snapshot);
+            if (!detail.isEmpty()) {
+                parts.add(detail);
+            }
+            if (!bytesText.isEmpty()) {
+                parts.add(bytesText);
+            }
             if (!speedText.isEmpty()) {
-                detail = detail.isEmpty() ? speedText : detail + " · " + speedText;
+                parts.add(speedText);
+            }
+            if (!etaText.isEmpty()) {
+                parts.add(etaText);
             }
             progress.accept(new InstallProgress(stage,
-                    from + (to - from) * snapshot.ratio(), detail));
+                    from + (to - from) * snapshot.ratio(), String.join(" · ", parts)));
         });
         progress.accept(new InstallProgress(stage, to, String.valueOf(tasks.size())));
     }

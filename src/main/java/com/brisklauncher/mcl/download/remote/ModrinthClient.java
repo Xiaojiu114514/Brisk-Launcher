@@ -50,7 +50,7 @@ public final class ModrinthClient {
             "https://mod.mcimirror.top/modrinth/v2");
 
     private static final String USER_AGENT =
-            "BriskLauncher/1.1.0 (contact: github.com/brisklauncher/brisk-launcher)";
+            "BriskLauncher/1.1.1 (contact: github.com/brisklauncher/brisk-launcher)";
     private static final Duration TIMEOUT = Duration.ofSeconds(20);
 
     public record Project(String id, String slug, String title, String description,
