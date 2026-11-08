@@ -542,8 +542,7 @@ public final class InstallVersionDialog {
                 String ui = com.brisklauncher.mcl.i18n.I18n.currentLocaleTag();
                 String gameLang = switch (ui == null ? "" : ui) {
                     case "zh_TW" -> "zh_tw";
-                    case "zh_HK" -> "zh_hk";
-                    case "en_US" -> "en_us";
+                        case "en_US" -> "en_us";
                     default -> "zh_cn";
                 };
                 java.nio.file.Files.writeString(options, "lang:" + gameLang + "\n",

@@ -28,11 +28,20 @@ public final class SafeLog {
             java.nio.file.Path dir = com.brisklauncher.mcl.AppPaths.logsDir();
             java.nio.file.Files.createDirectories(dir);
             com.brisklauncher.mcl.security.FilePerms.ensurePrivate(dir);
+            // 每次启动一个独立文件：logs/2026-11-08-135514.log（和 MC 一样），
+            // 同时继续写 logs/launcher.log（滚动 4MB×2），反馈问题时直接给这个就行。
+            String stamp = java.time.LocalDateTime.now()
+                    .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd-HHmmss"));
+            // count 不设（=1、不轮转）：文件名每次启动都不同，本来就没必要滚动；
+            // 设了 count 则 Java 会在同名文件被占用时生成 xxx.log.0 / .1，看着像重复日志。
             java.util.logging.FileHandler handler = new java.util.logging.FileHandler(
-                    dir.resolve("launcher.log").toString(), 4 * 1024 * 1024, 2, true);
-            handler.setFormatter(new java.util.logging.SimpleFormatter());
+                    dir.resolve(stamp + ".log").toString(), 0, 1, true);
+            java.util.logging.SimpleFormatter format = new java.util.logging.SimpleFormatter();
+            handler.setFormatter(format);
             handler.setLevel(java.util.logging.Level.ALL);
             LOGGER.addHandler(handler);
+            // 只保留「每次启动一个文件」的日志（logs/yyyy-MM-dd-HHmmss.log）。
+            // 以前还额外写 launcher.log，等于把同样内容存两份，已移除。
             LOGGER.setUseParentHandlers(true);
         } catch (Exception ignored) {
             // 写不了档就只输出主控台

@@ -48,7 +48,7 @@ public final class TaskDialog {
       detailLabel.setWrapText(true);
       detailLabel.setMaxWidth((double)420.0F);
       // HMCL 风格的阶段列表：每个阶段一行，已完成的打勾、当前的显示箭头、未开始的灰着
-      final InstallProgress.Stage[] stageOrder = {
+      final InstallProgress.Stage[] installStages = {
               InstallProgress.Stage.RESOLVING,
               InstallProgress.Stage.VERSION_JSON,
               InstallProgress.Stage.CLIENT_JAR,
@@ -57,14 +57,26 @@ public final class TaskDialog {
               InstallProgress.Stage.LOGGING,
               InstallProgress.Stage.FINISHING,
       };
-      final Label[] stageRows = new Label[stageOrder.length];
-      VBox stageList = new VBox((double)2.0F);
-      for (int i = 0; i < stageOrder.length; i++) {
-         Label row = new Label();
-         row.getStyleClass().add("cat-hint");
-         stageRows[i] = row;
-         stageList.getChildren().add(row);
-      }
+      // 自动更新只走两个阶段，不能套用「安装版本」的清单，否则界面会显示一堆无关的行
+      final InstallProgress.Stage[] updateStages = {
+              InstallProgress.Stage.UPDATE_DOWNLOAD,
+              InstallProgress.Stage.UPDATE_EXTRACT,
+      };
+      final InstallProgress.Stage[][] stageOrderRef = { installStages };
+      final VBox stageList = new VBox((double)2.0F);
+      final java.util.List<Label> stageRows = new java.util.ArrayList<>();
+      final Runnable[] rebuild = new Runnable[1];
+      rebuild[0] = () -> {
+         stageRows.clear();
+         stageList.getChildren().clear();
+         for (InstallProgress.Stage ignored : stageOrderRef[0]) {
+            Label row = new Label();
+            row.getStyleClass().add("cat-hint");
+            stageRows.add(row);
+            stageList.getChildren().add(row);
+         }
+      };
+      rebuild[0].run();
       final ProgressBar bar = new ProgressBar((double)-1.0F);
       bar.setMaxWidth(Double.MAX_VALUE);
       bar.getStyleClass().add("startup-progress");
@@ -95,27 +107,35 @@ public final class TaskDialog {
             stageLabel.setText(stage);
             detailLabel.setText(progress.detail() == null ? "" : progress.detail());
             // 阶段列表：已过的打 ✓，当前的用 ▶ 并加粗风格，未来的留空
+            // 先确认当前清单是否匹配（更新流 vs 安装流），不匹配就重建
+            boolean updateFlow = progress.stage() == InstallProgress.Stage.UPDATE_DOWNLOAD
+                    || progress.stage() == InstallProgress.Stage.UPDATE_EXTRACT;
+            InstallProgress.Stage[] wanted = updateFlow ? updateStages : installStages;
+            if (stageOrderRef[0] != wanted) {
+               stageOrderRef[0] = wanted;
+               rebuild[0].run();
+            }
             int currentIndex = -1;
-            for (int i = 0; i < stageOrder.length; i++) {
-               if (stageOrder[i] == progress.stage()) {
+            for (int i = 0; i < stageOrderRef[0].length; i++) {
+               if (stageOrderRef[0][i] == progress.stage()) {
                   currentIndex = i;
                   break;
                }
             }
             if (progress.stage() == InstallProgress.Stage.DONE) {
-               currentIndex = stageOrder.length;
+               currentIndex = stageOrderRef[0].length;
             }
-            for (int i = 0; i < stageRows.length; i++) {
-               String name = TaskDialog.stageText(stageOrder[i]);
-               if (currentIndex >= stageOrder.length || i < currentIndex) {
-                  stageRows[i].setText("✓  " + name);
-                  stageRows[i].setOpacity(0.55);
+            for (int i = 0; i < stageRows.size(); i++) {
+               String name = TaskDialog.stageText(stageOrderRef[0][i]);
+               if (currentIndex >= stageOrderRef[0].length || i < currentIndex) {
+                  stageRows.get(i).setText("✓  " + name);
+                  stageRows.get(i).setOpacity(0.55);
                } else if (i == currentIndex) {
-                  stageRows[i].setText("▶  " + name);
-                  stageRows[i].setOpacity(1.0);
+                  stageRows.get(i).setText("▶  " + name);
+                  stageRows.get(i).setOpacity(1.0);
                } else {
-                  stageRows[i].setText("·  " + name);
-                  stageRows[i].setOpacity(0.45);
+                  stageRows.get(i).setText("·  " + name);
+                  stageRows.get(i).setOpacity(0.45);
                }
             }
          }

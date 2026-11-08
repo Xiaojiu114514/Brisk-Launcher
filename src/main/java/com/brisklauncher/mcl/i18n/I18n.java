@@ -21,7 +21,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 public final class I18n {
 
     private static final String BUNDLE = "com.brisklauncher.mcl.i18n.messages";
-    private static final List<String> SUPPORTED = List.of("zh_CN", "zh_TW", "zh_HK", "en_US");
+    private static final List<String> SUPPORTED = List.of("zh_CN", "zh_TW", "en_US");
 
     private static String currentTag = "zh_CN";
     private static Locale currentLocale = Locale.SIMPLIFIED_CHINESE;
@@ -141,7 +141,6 @@ public final class I18n {
         return switch (tag) {
             case "zh_CN" -> "简体中文";
             case "zh_TW" -> "繁体中文（台湾）";
-            case "zh_HK" -> "繁体中文（香港）";
             case "en_US" -> "English";
             default -> Packs.languageName(tag);
         };
@@ -166,8 +165,7 @@ public final class I18n {
             currentLocale = switch (tag) {
                 case "en_US" -> Locale.US;
                 case "zh_TW" -> Locale.TRADITIONAL_CHINESE;
-                case "zh_HK" -> Locale.forLanguageTag("zh-Hant-HK");
-                default -> Locale.SIMPLIFIED_CHINESE;
+                    default -> Locale.SIMPLIFIED_CHINESE;
             };
             bundle = load(currentLocale);
         } else {

@@ -143,16 +143,20 @@ try {
   }
   Write-Log ("lock wait: " + $waited + "ms")
 
-  # 3) back up the current files (data/ is excluded: it is the player's data)
+  # 3) back up the current launcher files only.
+  #    Never back up player data or regenerable content:
+  #      data/       launcher settings, accounts, themes, logs
+  #      minecraft/  the built-in game directory (huge, and updates never touch it)
+  #      runtime/    jars extracted by the exe; recreated on the next launch
   if (Test-Path -LiteralPath $Backup) {
     Remove-Item -LiteralPath $Backup -Recurse -Force -ErrorAction SilentlyContinue
   }
   New-Item -ItemType Directory -Force -Path $Backup | Out-Null
-  Invoke-RoboCopy -From $Target -To $Backup -Extra @("/XD", "data")
-  Write-Log "backup done"
+  Invoke-RoboCopy -From $Target -To $Backup -Extra @("/XD", "data", "minecraft", "runtime", "logs", "instances")
+  Write-Log "backup done (data/minecraft/runtime excluded)"
 
   # 4) copy the staged files over the installation
-  Invoke-RoboCopy -From $Source -To $Target -Extra @("/XD", "data")
+  Invoke-RoboCopy -From $Source -To $Target -Extra @("/XD", "data", "minecraft", "runtime")
   # lib/app are launcher-managed: purge stale jars so the module path never
   # contains two versions of the same module.
   Invoke-Mirror -From (Join-Path $Source "lib") -To (Join-Path $Target "lib")

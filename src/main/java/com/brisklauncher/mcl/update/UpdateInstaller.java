@@ -571,6 +571,10 @@ public final class UpdateInstaller {
     }
 
     private static double clamp(double value) {
+        // 负数代表「不确定长度」（更新包没给 size）→ 原样传给界面，让它显示转圈而不是卡在 0%
+        if (value < 0) {
+            return -1;
+        }
         return Math.max(0, Math.min(1, value));
     }
 

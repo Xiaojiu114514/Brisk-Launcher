@@ -107,8 +107,11 @@ public final class HttpDownloader implements AutoCloseable {
                 try {
                     currentFile.set(task.fileName());
                     if (task.alreadySatisfied()) {
-                        // 已存在 → 算完成，但**不计入 bytesDone**（那些位元组没经过网路，
-                        // 计进去会让速度虚高：实测 6.6MB/s 而工作管理员只有 1.2Mbps）
+                        // 已存在 → 算完成。字节也要计入 bytesDone：
+                        // 否则「重试更新时文件已存在」的任务被跳过，进度会永远停在 0%。
+                        if (task.size() > 0) {
+                            bytesDone.addAndGet(task.size());
+                        }
                         completed.incrementAndGet();
                         report.run();
                         return;
@@ -214,7 +217,7 @@ public final class HttpDownloader implements AutoCloseable {
     private void fetch(URI uri, Path temp, AtomicLong bytesDone, Runnable onByteProgress) throws IOException {
         try {
             HttpRequest request = HttpRequest.newBuilder(uri)
-                    .header("User-Agent", "BriskLauncher/1.1.1")
+                    .header("User-Agent", "BriskLauncher/1.1.2")
                     .header("Accept", "*/*")
                     .timeout(Duration.ofMinutes(3))
                     .GET()

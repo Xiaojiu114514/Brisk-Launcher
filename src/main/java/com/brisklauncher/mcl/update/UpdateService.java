@@ -31,7 +31,7 @@ import java.util.function.Consumer;
 public final class UpdateService {
 
     /** 目前版本（與 build.gradle / pom.xml 保持一致）。 */
-    public static final String CURRENT_VERSION = "1.1.1";
+    public static final String CURRENT_VERSION = "1.1.2";
 
     private static final Duration TIMEOUT = Duration.ofSeconds(20);
 
@@ -185,12 +185,32 @@ public final class UpdateService {
         // 安全审计 L9：资产名来自远端 JSON，只能取 basename
         Path target = com.brisklauncher.mcl.security.PathSafety.resolveUnder(
                 dir, com.brisklauncher.mcl.security.PathSafety.safeFileName(name));
+        // 上游没给 size 时 ratio 只能算 0 或 1（进度条看着像卡住）→ 先发一个「不定长」让界面转圈
+        if (progress != null && asset.size() <= 0) {
+            progress.accept(-1.0);
+        }
+        long size = asset.size();
+        SafeLog.info("[update] 开始下载更新包：" + target.getFileName() + "（声明大小 " + size + " 字节）");
+        int[] lastBucket = {-1};
         downloader.downloadAll(List.of(new DownloadTask(List.of(URI.create(asset.url())), target,
-                null, asset.size() > 0 ? asset.size() : -1)), snapshot -> {
+                null, size > 0 ? size : -1)), snapshot -> {
+            double ratio = snapshot == null ? 0 : snapshot.ratio();
+            // 上游没给 size 时 bytesTotal 一直是 0，ratio 只能算出 0 或 1 → 进度条会停在 0%。
+            // 这种情况统一发 -1（界面显示成"转圈"），不要假装 0%。
             if (progress != null) {
-                progress.accept(snapshot == null ? 0 : snapshot.ratio());
+                progress.accept(size > 0 ? ratio : -1.0);
+            }
+            if (size > 0) {
+                int bucket = (int) (ratio * 10);
+                if (bucket != lastBucket[0]) {
+                    lastBucket[0] = bucket;
+                    SafeLog.info("[update] 下载进度 " + Math.round(ratio * 100) + "%（"
+                            + (snapshot == null ? 0 : snapshot.bytesDone()) + "/"
+                            + (snapshot == null ? 0 : snapshot.bytesTotal()) + "）");
+                }
             }
         });
+        SafeLog.info("[update] 更新包下载完成：" + target.getFileName());
         // 安全审计 M-07：下载完再按上游 digest 校验一次 SHA-256
         if (asset.sha256() != null && !asset.sha256().isBlank()) {
             String actual = sha256Of(target);

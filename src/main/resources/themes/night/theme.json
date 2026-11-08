@@ -2,13 +2,11 @@
   "name": {
     "zh_CN": "夜色",
     "zh_TW": "夜色",
-    "zh_HK": "夜色",
     "en_US": "Night"
   },
   "description": {
     "zh_CN": "深色低饱和：暗底 + 柔和蓝主色，长时间看不刺眼（不用霓虹色）。",
     "zh_TW": "深色低飽和：暗底 + 柔和藍主色，長時間看不刺眼（不用霓虹色）。",
-    "zh_HK": "深色低飽和：暗底 + 柔和藍主色，長時間看不刺眼（不用霓虹色）。",
     "en_US": "Dark and low-saturation: dim surfaces with a soft blue accent, easy on the eyes."
   },
   "author": "Brisk Launcher",

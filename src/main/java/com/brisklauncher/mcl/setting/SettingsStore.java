@@ -83,7 +83,7 @@ public final class SettingsStore {
             return "zh_TW";
         }
         if (lower.contains("hk") || lower.contains("mo")) {
-            return "zh_HK";
+            return "zh_TW";
         }
         if (lower.startsWith("zh")) {
             return "zh_CN";

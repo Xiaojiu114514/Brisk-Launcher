@@ -271,7 +271,7 @@ public final class AppPaths {
         // 单 exe / 便携版：由启动器把数据目录定死在「exe 同级」，不要按 java.exe 的位置去猜。
         String override = System.getProperty("mcl.dataDir");
         if (override != null && !override.isBlank()) {
-            return normalize(Paths.get(override.trim()));
+            return normalize(Paths.get(unquote(override)));
         }
         Path app = detectAppDir();
         Path base = app != null ? app
@@ -289,7 +289,7 @@ public final class AppPaths {
     public static Path accountsDir() {
         String override = System.getProperty("mcl.accountsDir");
         if (override != null && !override.isBlank()) {
-            return normalize(Paths.get(override.trim()));
+            return normalize(Paths.get(unquote(override)));
         }
         return launcherRoot();
     }
@@ -472,6 +472,26 @@ public final class AppPaths {
         });
     }
 
+    /**
+     * 去掉 -D 值两端可能残留的引号。
+     *
+     * <p>启动器给 JVM 传参时写成 {@code -Dmcl.home="E:\x\data"}，Windows 下引号一般会被
+     * 命令列解析器吃掉，但通过某些方式（cmd 手动粘贴、第三方壳）时引号会原样进到属性值里，
+     * 于是 {@code Paths.get(""E:\x\data"")} 直接抛 InvalidPathException。
+     */
+    private static String unquote(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String value = raw.trim();
+        while (value.length() >= 2
+                && ((value.startsWith("\"") && value.endsWith("\""))
+                    || (value.startsWith("'") && value.endsWith("'")))) {
+            value = value.substring(1, value.length() - 1).trim();
+        }
+        return value;
+    }
+
     /** 应用镜像旁边的 data/；不可写时退回 LOCALAPPDATA。 */
     private static Path portableRoot() {
         Path appDir = detectAppDir();
@@ -511,7 +531,7 @@ public final class AppPaths {
             // 于是 data/ 被建到 C:\Program Files\Java\... 里（不可写）。
             String explicit = System.getProperty("mcl.appDir");
             if (explicit != null && !explicit.isBlank()) {
-                Path dir = Paths.get(explicit.trim());
+                Path dir = Paths.get(unquote(explicit));
                 if (Files.isDirectory(dir)) {
                     return normalize(dir);
                 }

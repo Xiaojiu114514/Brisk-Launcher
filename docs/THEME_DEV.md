@@ -180,7 +180,7 @@ Your theme stays in the list with a warning instead of silently doing nothing �
 ### 10. Multi-language metadata
 
 Use the locale-map form for `name` / `description` (see §4). Keys are the same tags the launcher uses:
-`zh_CN`, `zh_TW`, `zh_HK`, `en_US` (custom language pack ids work too, but keep at least `zh_CN` and
+`zh_CN`, `zh_TW`, `en_US` (custom language pack ids work too, but keep at least `zh_CN` and
 `en_US` so there is always something to fall back to).
 
 ### 11. Publishing
@@ -534,7 +534,7 @@ data/themes/my-theme/
 ### 10. 多语言元数据
 
 `name` / `description` 用上面那种「语言 → 字串」的物件。键名与启动器一致：
-`zh_CN`、`zh_TW`、`zh_HK`、`en_US`（自订语言包 id 也可以，但至少留 `zh_CN` 与 `en_US` 兜底）。
+`zh_CN`、`zh_TW`、`en_US`（自订语言包 id 也可以，但至少留 `zh_CN` 与 `en_US` 兜底）。
 
 ### 11. 发布
 
@@ -738,7 +738,7 @@ data/themes/my-theme/
 ### 10. 多語言中介資料
 
 `name` / `description` 用上面那種「語言 → 字串」的物件。鍵名與啟動器一致：
-`zh_CN`、`zh_TW`、`zh_HK`、`en_US`（自訂語言包 id 也可以，但至少留 `zh_CN` 與 `en_US` 兜底）。
+`zh_CN`、`zh_TW`、`en_US`（自訂語言包 id 也可以，但至少留 `zh_CN` 與 `en_US` 兜底）。
 
 ### 11. 發佈
 

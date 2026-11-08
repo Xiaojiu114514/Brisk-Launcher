@@ -156,7 +156,7 @@ again after you navigate away and back. Put reusable state in fields of the plug
 
 | Group | Method | Notes |
 |---|---|---|
-| Identity | `pluginId()`, `locale()`, `launcherVersion()` | `locale()` is `zh_CN` / `zh_TW` / `zh_HK` / `en_US` / custom pack id |
+| Identity | `pluginId()`, `locale()`, `launcherVersion()` | `locale()` is `zh_CN` / `zh_TW` / `en_US` / custom pack id |
 | Paths | `dataDir()` | Launcher data dir — **read only by convention** |
 | | `pluginDataDir()` | `data\plugin-data\<id>\`, created for you, writable |
 | HTTP | `httpGet(url)`, `httpGetText(url)` | Blocking, 20 s timeout |
@@ -519,7 +519,7 @@ public final class HelloPlugin implements LauncherPlugin {
 
 | 分组 | 方法 | 说明 |
 |---|---|---|
-| 身份 | `pluginId()`、`locale()`、`launcherVersion()` | `locale()` 是 `zh_CN` / `zh_TW` / `zh_HK` / `en_US` / 自订语言包 id |
+| 身份 | `pluginId()`、`locale()`、`launcherVersion()` | `locale()` 是 `zh_CN` / `zh_TW` / `en_US` / 自订语言包 id |
 | 路径 | `dataDir()` | 启动器数据目录，**约定只读** |
 | | `pluginDataDir()` | `data\plugin-data\<id>\`，已建好，可写 |
 | 网络 | `httpGet(url)`、`httpGetText(url)` | 同步，20 秒超时 |
@@ -880,7 +880,7 @@ public final class HelloPlugin implements LauncherPlugin {
 
 | 分組 | 方法 | 說明 |
 |---|---|---|
-| 身分 | `pluginId()`、`locale()`、`launcherVersion()` | `locale()` 是 `zh_CN` / `zh_TW` / `zh_HK` / `en_US` / 自訂語言包 id |
+| 身分 | `pluginId()`、`locale()`、`launcherVersion()` | `locale()` 是 `zh_CN` / `zh_TW` / `en_US` / 自訂語言包 id |
 | 路徑 | `dataDir()` | 啟動器資料目錄，**約定唯讀** |
 | | `pluginDataDir()` | `data\plugin-data\<id>\`，已建好，可寫 |
 | 網路 | `httpGet(url)`、`httpGetText(url)` | 同步，20 秒逾時 |

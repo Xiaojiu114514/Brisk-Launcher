@@ -1224,11 +1224,11 @@ public final class MclApplication extends Application {
      * （毫秒，自 JVM 启动算起），用来判断「启动慢」到底慢在哪一段。
      */
     static void trace(String what) {
-        if (System.getProperty("mcl.startup.trace") == null) {
-            return;
-        }
         long ms = java.lang.management.ManagementFactory.getRuntimeMXBean().getUptime();
-        System.out.println("[startup +" + ms + "ms] " + what);
+        String line = "[startup +" + ms + "ms] " + what;
+        // 单 exe（winexe）没有控制台，System.out 看不到；启动卡死时正是最需要这份轨迹，
+        // 所以一律写进 data/logs/launcher.log。
+        com.brisklauncher.mcl.security.SafeLog.info(line);
     }
 
     /** 背景初始化失败：停在启动动画上把原因说清楚，然后退出（不要留一个空白窗口）。 */
@@ -1243,6 +1243,9 @@ public final class MclApplication extends Application {
     }
 
     public static void main(String[] args) {
+        // 第一行就打点：启动卡死时至少能确认「JVM 已经跑到 main」，
+        // 从而区分是 JavaFX 初始化卡住、还是根本没起来（引导器/解压阶段）。
+        com.brisklauncher.mcl.security.SafeLog.info("[startup] main() 进入");
         trace("main() 入口");
         // 必须在 JNA 加载前把原生库目录指到可写位置（jlink 镜像里 java.io.tmpdir 可能不可写）
         com.brisklauncher.mcl.security.NativeSetup.prepare();

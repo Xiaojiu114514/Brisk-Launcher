@@ -39,6 +39,26 @@ internal static class BriskBoot
         "-Djava.net.preferIPv4Stack=true",
     };
 
+    /// <summary>引导器自己的日志：卡在「gif 之后、主界面之前」时，这里能看到卡在哪一步。</summary>
+    private static string bootLogPath;
+
+    private static void BootLog(string message)
+    {
+        try
+        {
+            if (bootLogPath == null)
+            {
+                return;
+            }
+            File.AppendAllText(bootLogPath,
+                DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff") + "  " + message + Environment.NewLine);
+        }
+        catch (Exception)
+        {
+            // 日志失败不能影响启动
+        }
+    }
+
     [STAThread]
     private static int Main(string[] args)
     {
@@ -58,6 +78,17 @@ internal static class BriskBoot
     private static void Launch(string[] args)
     {
         string exeDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+        try
+        {
+            string logDir = Path.Combine(exeDir, "data", "logs", "boot");
+            Directory.CreateDirectory(logDir);
+            bootLogPath = Path.Combine(logDir, "boot-" + DateTime.Now.ToString("yyyy-MM-dd-HHmmss") + ".log");
+            BootLog("BriskBoot 启动（exe 目录 " + exeDir + "）");
+        }
+        catch (Exception)
+        {
+            bootLogPath = null;
+        }
         string dataDir = Path.Combine(exeDir, "data");
         string runtimeDir = Path.Combine(exeDir, "runtime");
         string libDir = Path.Combine(runtimeDir, "lib");
@@ -68,7 +99,9 @@ internal static class BriskBoot
         Directory.CreateDirectory(tempDir);
         Directory.CreateDirectory(Path.Combine(exeDir, "minecraft", "versions"));
 
+        BootLog("开始同步 runtime/lib");
         SyncLibraries(libDir);
+        BootLog("runtime/lib 就绪");
         string splash = ExtractIfChanged("splash.gif", runtimeDir);
         ExtractIfChanged("install-java.ps1", runtimeDir);
         WriteBundleStamp(runtimeDir);
@@ -97,7 +130,6 @@ internal static class BriskBoot
         command.Append("-Dmcl.home=").Append(Quote(dataDir)).Append(' ');
         command.Append("-Dmcl.dataDir=").Append(Quote(dataDir)).Append(' ');
         command.Append("-Dmcl.appDir=").Append(Quote(exeDir)).Append(' ');
-        command.Append("-Djava.io.tmpdir=").Append(Quote(tempDir)).Append(' ');
         // 账号清单与凭据命名空间放 %LOCALAPPDATA%\BriskLauncher：
         // exe 随便换路径都能看到同一份账号（凭据管理器本来就是按 Windows 用户存的）
         string accountsDir = Path.Combine(
@@ -122,8 +154,46 @@ internal static class BriskBoot
             WorkingDirectory = exeDir,
             UseShellExecute = false,
             CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
         };
-        Process.Start(start);
+        BootLog("准备启动 JVM：" + java);
+        // 把完整命令行也记下来：JVM 崩在 main 之前时，可以让用户直接复制到 cmd 里复现，
+        // winexe 看到的退出码（例如 0xCFFFFFFF）本身没有信息量。
+        BootLog("命令行：" + java + " " + command.ToString());
+        using (Process child = new Process { StartInfo = start })
+        {
+            child.OutputDataReceived += (sender, e) =>
+            {
+                if (e.Data != null)
+                {
+                    BootLog("JVM  " + e.Data);
+                }
+            };
+            child.ErrorDataReceived += (sender, e) =>
+            {
+                if (e.Data != null)
+                {
+                    BootLog("JVM! " + e.Data);
+                }
+            };
+            child.Start();
+            child.BeginOutputReadLine();
+            child.BeginErrorReadLine();
+            BootLog("JVM 已拉起，等待退出");
+            // 继续持有管道直到子进程结束：提前退出会让子进程写 stdout 时报错甚至卡住
+            child.WaitForExit();
+            int code = child.ExitCode;
+            string hex = "0x" + (code & 0xFFFFFFFFL).ToString("X8");
+            BootLog("JVM 已退出，退出码 " + code + "（" + hex + "）");
+            if (code != 0 && !File.Exists(Path.Combine(exeDir, "data", "logs",
+                    DateTime.Now.ToString("yyyy-MM-dd") + "*.log")))
+            {
+                BootLog("提示：JVM 在写出任何日志前就退出了，请把上面的命令行复制到 cmd 里执行，"
+                        + "查看 java 打印的错误");
+            }
+            Environment.Exit(child.ExitCode);
+        }
     }
 
     // ---------- 内嵌资源：单目录同步（补写 + 删旧） ----------

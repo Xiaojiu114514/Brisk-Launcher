@@ -66,15 +66,20 @@ import java.util.function.Consumer;
  */
 public final class MicrosoftAuthProvider implements AuthProvider {
 
-    /** 不再申请 offline_access：本启动器不保存 refresh token，多要权限只会扩大泄漏面。 */
-    private static final String SCOPE = "XboxLive.signin";
+    /**
+     * 申请 offline_access：Microsoft 才会下发 refresh_token。
+     *
+     * <p>以前刻意不要它，结果 access token 一过期就只能让玩家重新登录。
+     * 现在 refresh_token 加密存在 Windows 凭据管理器里，过期后自动续期。
+     */
+    private static final String SCOPE = "XboxLive.signin offline_access";
     private static final String AUTHORIZE_URL = "https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize";
     private static final String TOKEN_URL = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token";
     private static final String XBL_URL = "https://user.auth.xboxlive.com/user/authenticate";
     private static final String XSTS_URL = "https://xsts.auth.xboxlive.com/xsts/authorize";
     private static final String MC_LOGIN_URL = "https://api.minecraftservices.com/authentication/login_with_xbox";
     private static final String MC_PROFILE_URL = "https://api.minecraftservices.com/minecraft/profile";
-    private static final String USER_AGENT = "BriskLauncher/1.1.1";
+    private static final String USER_AGENT = "BriskLauncher/1.1.2";
     private static final Duration TIMEOUT = Duration.ofSeconds(30L);
 
     /** 等使用者完成网页登录的上限（秒）。 */
@@ -173,13 +178,14 @@ public final class MicrosoftAuthProvider implements AuthProvider {
                             + "&code_verifier=" + encode(callback.verifier());
                     JsonNode tokenNode = postForm(TOKEN_URL, tokenBody);
                     msAccessToken = tokenNode.path("access_token").asText("");
+                    msRefreshToken = tokenNode.path("refresh_token").asText("");
                     if (msAccessToken.isEmpty()) {
                         throw new AuthException(I18n.t("account.ms.token_failed",
                                 describeOAuthError(tokenNode)));
                     }
                 }
 
-                finishXboxLogin(msAccessToken, onStateChange, onComplete);
+                finishXboxLogin(msAccessToken, msRefreshToken, onStateChange, onComplete);
             } catch (AuthException e) {
                 onComplete.accept(LoginResult.fail(e.getMessage()));
             } catch (Exception e) {
@@ -187,6 +193,9 @@ public final class MicrosoftAuthProvider implements AuthProvider {
             }
         });
     }
+
+    /** Microsoft refresh token（scope 含 offline_access 才有）。 */
+    private String msRefreshToken;
 
     private String effectiveClientId() {
         return MsClientId.resolve(this.clientId);
@@ -523,7 +532,8 @@ public final class MicrosoftAuthProvider implements AuthProvider {
     //  Xbox / Minecraft 换令牌
     // ================================================================
 
-    private void finishXboxLogin(String msAccessToken, Consumer<String> onStateChange,
+    private void finishXboxLogin(String msAccessToken, String refreshToken,
+                                 Consumer<String> onStateChange,
                                  Consumer<LoginResult> onComplete) throws Exception {
         onStateChange.accept(I18n.t("account.ms.state.xbox"));
         Map<String, Object> xblPayload = Map.of(
@@ -602,8 +612,10 @@ public final class MicrosoftAuthProvider implements AuthProvider {
             throw new AuthException(I18n.t("account.ms.profile_missing"));
         }
 
+        char[] refreshChars = refreshToken == null || refreshToken.isBlank()
+                ? null : refreshToken.toCharArray();
         StoredSession session = new StoredSession(AccountType.MICROSOFT, uuid, name,
-                (char[]) null, mcAccessToken.toCharArray(),
+                refreshChars, mcAccessToken.toCharArray(),
                 System.currentTimeMillis() + expiresIn * 1000L, (String) null);
         SafeLog.loginSuccess(AccountType.MICROSOFT);
         onComplete.accept(LoginResult.ok(session));
@@ -739,9 +751,43 @@ public final class MicrosoftAuthProvider implements AuthProvider {
         return URLEncoder.encode(raw, StandardCharsets.UTF_8);
     }
 
+    /**
+     * 用 refresh_token 续期：refresh_token → 新 MSA token（顺带轮换）→ 复用登录链路。
+     */
+    @Override
     public LoginResult refresh(StoredSession session) {
-        // 刻意不保存 refresh token（scope 里也没有 offline_access），所以只能请使用者重新登录
-        return LoginResult.fail(I18n.t("account.ms.refresh_unsupported"));
+        if (session == null || session.refreshToken() == null) {
+            return LoginResult.fail(I18n.t("account.ms.refresh_unsupported"));
+        }
+        String cid = effectiveClientId();
+        if (cid == null || cid.isBlank()) {
+            return LoginResult.fail(I18n.t("account.ms.client_id_missing"));
+        }
+        try {
+            String body = "grant_type=refresh_token"
+                    + "&client_id=" + encode(cid)
+                    + "&refresh_token=" + encode(new String(session.refreshToken()))
+                    + "&scope=" + encode(SCOPE);
+            JsonNode tokenNode = postForm(TOKEN_URL, body);
+            String access = tokenNode.path("access_token").asText("");
+            if (access.isEmpty()) {
+                SafeLog.warn("[auth] 刷新令牌失败：" + describeOAuthError(tokenNode));
+                return LoginResult.fail(I18n.t("account.ms.refresh_unsupported"));
+            }
+            String rotated = tokenNode.path("refresh_token").asText("");
+            String finalRefresh = rotated.isEmpty()
+                    ? new String(session.refreshToken()) : rotated;
+            LoginResult[] holder = new LoginResult[1];
+            finishXboxLogin(access, finalRefresh, state -> { }, result -> holder[0] = result);
+            if (holder[0] == null) {
+                return LoginResult.fail(I18n.t("account.ms.refresh_unsupported"));
+            }
+            SafeLog.info("[auth] 已用 refresh token 续期");
+            return holder[0];
+        } catch (Exception error) {
+            SafeLog.warn("[auth] 刷新令牌异常：" + error.getClass().getSimpleName());
+            return LoginResult.fail(safeError(error));
+        }
     }
 
     public boolean validate(StoredSession session) {

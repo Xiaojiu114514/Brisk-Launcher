@@ -65,10 +65,10 @@ public final class Packs {
 
                         每个语言包一个文件夹，文件夹名就是语言标识，例如 my_lang。
                         文件夹内放 messages.properties（UTF-8），键名与内置语言包一致
-                        （可参考 zh_CN / zh_TW / zh_HK / en_US 里的 messages.properties）。
+                        （可参考 zh_CN / zh_TW / en_US 里的 messages.properties）。
                         可选：同目录放 pack.properties，内容 name=显示名称 / author=作者 / version=版本。
 
-                        注意：zh_CN / zh_TW / zh_HK / en_US 这四个是内置语言的「模板副本」，
+                        注意：zh_CN / zh_TW / en_US 这四个是内置语言的「模板副本」，
                         每次启动都会跟着版本刷新；想自己改翻译，请把整个文件夹复制成新名字
                         （例如 zh_CN_my），再改里面的内容，然后在「设置 → 外观」里选它。
 
@@ -93,8 +93,6 @@ public final class Packs {
         writeResourceLanguage("zh_CN", "简体中文", "/com/brisklauncher/mcl/i18n/messages.properties");
         writeResourceLanguage("zh_TW", "繁体中文（台湾）",
                 "/com/brisklauncher/mcl/i18n/messages_zh_TW.properties");
-        writeResourceLanguage("zh_HK", "繁体中文（香港）",
-                "/com/brisklauncher/mcl/i18n/messages_zh_HK.properties");
         writeResourceLanguage("en_US", "English",
                 "/com/brisklauncher/mcl/i18n/messages_en_US.properties");
     }
@@ -149,7 +147,6 @@ public final class Packs {
         List<Pack> result = new ArrayList<>();
         result.add(new Pack("zh_CN", "简体中文", null, false));
         result.add(new Pack("zh_TW", "繁体中文（台湾）", null, false));
-        result.add(new Pack("zh_HK", "繁体中文（香港）", null, false));
         result.add(new Pack("en_US", "English", null, false));
         // lang/ 下的内建复本会被扫成 custom=true，这里去重避免下拉出现两份
         for (Pack pack : scan(langDir(), "messages.properties")) {

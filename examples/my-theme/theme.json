@@ -2,13 +2,11 @@
   "name": {
     "zh_CN": "示例：午夜紫",
     "zh_TW": "範例：午夜紫",
-    "zh_HK": "範例：午夜紫",
     "en_US": "Sample: Midnight Purple"
   },
   "description": {
     "zh_CN": "示范「只改设计变量」的写法：复制到 data/themes/ 就能用，整个启动器（含对话框与原生控件）会一起换色。",
     "zh_TW": "示範「只改設計變數」的寫法：複製到 data/themes/ 就能用，整個啟動器（含對話框與原生控件）會一起換色。",
-    "zh_HK": "示範「只改設計變數」的寫法：複製到 data/themes/ 就能用，整個啟動器（含對話框與原生控件）會一起換色。",
     "en_US": "Shows the token-only approach: copy into data/themes/ and the whole launcher (dialogs and native controls included) recolours."
   },
   "author": "Brisk Launcher",
