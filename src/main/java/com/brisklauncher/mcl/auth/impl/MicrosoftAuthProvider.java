@@ -79,7 +79,7 @@ public final class MicrosoftAuthProvider implements AuthProvider {
     private static final String XSTS_URL = "https://xsts.auth.xboxlive.com/xsts/authorize";
     private static final String MC_LOGIN_URL = "https://api.minecraftservices.com/authentication/login_with_xbox";
     private static final String MC_PROFILE_URL = "https://api.minecraftservices.com/minecraft/profile";
-    private static final String USER_AGENT = "BriskLauncher/1.1.2";
+    private static final String USER_AGENT = "BriskLauncher/1.1.3";
     private static final Duration TIMEOUT = Duration.ofSeconds(30L);
 
     /** 等使用者完成网页登录的上限（秒）。 */

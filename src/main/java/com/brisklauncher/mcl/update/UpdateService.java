@@ -31,7 +31,7 @@ import java.util.function.Consumer;
 public final class UpdateService {
 
     /** 目前版本（與 build.gradle / pom.xml 保持一致）。 */
-    public static final String CURRENT_VERSION = "1.1.2";
+    public static final String CURRENT_VERSION = "1.1.3";
 
     private static final Duration TIMEOUT = Duration.ofSeconds(20);
 
@@ -86,11 +86,19 @@ public final class UpdateService {
             return new CheckResult(false, null, "仓库地址格式应为 owner/repo");
         }
         boolean gitee = "gitee".equalsIgnoreCase(settings.updateChannel());
+        // Gitee 的 /releases/latest 返回的是「最早创建的那个 release」（实测 v1.0.0），
+        // 而且 /releases 列表是旧→新；所以 Gitee 走列表接口，再按版本号取最大。
         String api = gitee
-                ? "https://gitee.com/api/v5/repos/" + repo + "/releases/latest"
+                ? "https://gitee.com/api/v5/repos/" + repo + "/releases?per_page=100"
                 : "https://api.github.com/repos/" + repo + "/releases/latest";
         try {
             JsonNode root = Http.getJson(URI.create(api), TIMEOUT);
+            if (gitee) {
+                root = pickLatestRelease(root);
+                if (root == null) {
+                    return new CheckResult(false, null, "release 列表为空");
+                }
+            }
             String tag = root.path("tag_name").asText("");
             if (tag.isBlank()) {
                 return new CheckResult(false, null, "release 资讯里没有 tag_name");
@@ -197,6 +205,7 @@ public final class UpdateService {
             double ratio = snapshot == null ? 0 : snapshot.ratio();
             // 上游没给 size 时 bytesTotal 一直是 0，ratio 只能算出 0 或 1 → 进度条会停在 0%。
             // 这种情况统一发 -1（界面显示成"转圈"），不要假装 0%。
+            String host = snapshot == null ? "" : snapshot.host();
             if (progress != null) {
                 progress.accept(size > 0 ? ratio : -1.0);
             }
@@ -204,7 +213,7 @@ public final class UpdateService {
                 int bucket = (int) (ratio * 10);
                 if (bucket != lastBucket[0]) {
                     lastBucket[0] = bucket;
-                    SafeLog.info("[update] 下载进度 " + Math.round(ratio * 100) + "%（"
+                    SafeLog.info("[update] 下载进度 " + Math.round(ratio * 100) + "% [" + host + "]（"
                             + (snapshot == null ? 0 : snapshot.bytesDone()) + "/"
                             + (snapshot == null ? 0 : snapshot.bytesTotal()) + "）");
                 }
@@ -273,6 +282,35 @@ public final class UpdateService {
     }
 
     /** 版本號比較（1.2.0 &gt; 1.10.0 這種按數字段比，而不是字串比）。 */
+    /**
+     * 从 release 列表里挑版本号最大的一个。
+     *
+     * <p>Gitee 的列表是「旧 → 新」，而且 {@code /releases/latest} 返回的是最早创建的
+     * release（实测停在 v1.0.0），所以不能取 [0]，也不能信 latest。
+     */
+    private static JsonNode pickLatestRelease(JsonNode list) {
+        if (list == null || !list.isArray()) {
+            return null;
+        }
+        JsonNode best = null;
+        String bestTag = "";
+        for (JsonNode node : list) {
+            String tag = node.path("tag_name").asText("");
+            if (tag.isBlank()) {
+                continue;
+            }
+            if (node.path("prerelease").asBoolean(false)) {
+                // 预发布不参与「最新版」比较（GitHub 的 latest 也是这个行为）
+                continue;
+            }
+            if (best == null || compareVersions(tag, bestTag) > 0) {
+                best = node;
+                bestTag = tag;
+            }
+        }
+        return best;
+    }
+
     public static int compareVersions(String left, String right) {
         int[] a = numbers(left);
         int[] b = numbers(right);

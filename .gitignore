@@ -1,4 +1,4 @@
-# ---------- 构建产物 ----------
+﻿# ---------- 构建产物 ----------
 build/
 target/
 out/
@@ -79,3 +79,6 @@ instance-id.txt  # 账号实例 id
 plugin-trust.json  # 插件信任记录
 launcher.lock  # 启动器锁
 /data/tmp/  # 临时文件
+# ---------- 构建密钥（统一文件） ----------
+config/secrets.properties
+!config/secrets.properties.example

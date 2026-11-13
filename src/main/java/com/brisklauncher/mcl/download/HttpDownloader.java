@@ -41,6 +41,8 @@ public final class HttpDownloader implements AutoCloseable {
 
     private final ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor();
     private final Semaphore permits;
+    /** 最近一次实际使用的下载主机（用于在界面上显示来源，方便排查镜像问题）。 */
+    private volatile String lastUsedHost = "";
     private final int retries;
     private final Duration timeout;
 
@@ -82,7 +84,8 @@ public final class HttpDownloader implements AutoCloseable {
 
         Consumer<DownloadProgress> safeProgress = progress == null ? p -> { } : progress;
         Runnable report = () -> safeProgress.accept(new DownloadProgress(
-                completed.get(), total, bytesDone.get(), bytesTotal.get(), currentFile.get()));
+                completed.get(), total, bytesDone.get(), bytesTotal.get(), currentFile.get(),
+                lastUsedHost));
 
         Runnable reportThrottled = () -> {
             long now = System.currentTimeMillis();
@@ -217,7 +220,7 @@ public final class HttpDownloader implements AutoCloseable {
     private void fetch(URI uri, Path temp, AtomicLong bytesDone, Runnable onByteProgress) throws IOException {
         try {
             HttpRequest request = HttpRequest.newBuilder(uri)
-                    .header("User-Agent", "BriskLauncher/1.1.2")
+                    .header("User-Agent", "BriskLauncher/1.1.3")
                     .header("Accept", "*/*")
                     .timeout(Duration.ofMinutes(3))
                     .GET()

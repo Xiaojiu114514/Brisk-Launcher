@@ -338,10 +338,8 @@ public final class AccountPage extends VBox implements MclPage {
 
     private void showOffline() {
         currentPaneBuilder = this::showOffline;
-        if (!hasMicrosoftAccount()) {
-            showLicenceGate("account.tab.offline");
-            return;
-        }
+        // 不再要求先登录正版账号：没有正版的玩家也能直接用离线账号。
+        // 「购买正版」的提示仍保留在页面上（见下面的 buy 按钮）。
         ListView<AccountStore.Account> list = accountList(AccountType.OFFLINE);
 
         TextField nameField = new TextField();
@@ -377,10 +375,7 @@ public final class AccountPage extends VBox implements MclPage {
 
     private void showThirdParty() {
         currentPaneBuilder = this::showThirdParty;
-        if (!hasMicrosoftAccount()) {
-            showLicenceGate("account.tab.third_party");
-            return;
-        }
+        // 同上：第三方（Yggdrasil / authlib-injector）登录不再被正版登录拦截。
         ListView<AccountStore.Account> list = accountList(AccountType.THIRD_PARTY);
 
         TextField endpointField = new TextField();
@@ -448,6 +443,7 @@ public final class AccountPage extends VBox implements MclPage {
      *
      * <p>这样既符合 Mojang 的使用条款，也让审核方一眼看到「本启动器优先引导正版」。
      */
+    @Deprecated
     private void showLicenceGate(String titleKey) {
         Label title = UiKit.title(I18n.t(titleKey));
         Label body = new Label(I18n.t("account.gate.body"));

@@ -77,7 +77,7 @@ public final class GameLauncher {
     private static final Pattern PLACEHOLDER = Pattern.compile("\\$\\{[^}]+}");
     private static final DateTimeFormatter LOG_TIME = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
     private static final String LAUNCHER_NAME = "BriskLauncher";
-    private static final String LAUNCHER_VERSION = "1.1.2";
+    private static final String LAUNCHER_VERSION = "1.1.3";
 
     private final Supplier<LauncherSettings> settingsSupplier;
     private final VersionInstaller installer;

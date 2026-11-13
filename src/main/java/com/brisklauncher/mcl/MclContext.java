@@ -270,6 +270,10 @@ public final class MclContext {
 
     private static void applyGlobalSettings(LauncherSettings settings) {
         System.setProperty("mcl.proxy", settings.proxy());
+        // 设置页填的 CurseForge key（加密存在 launcher.json）；没填就回退构建注入值
+        com.brisklauncher.mcl.util.CurseForgeKey.setUserKey(settings.curseforgeApiKey());
+        // key / 镜像配置变了：清掉 CurseForge 的失败冷却与结果缓存，下一次搜索立刻用新配置
+        com.brisklauncher.mcl.download.remote.CurseForgeClient.resetState();
         // 安全审计 M-05：insecureTls 会关掉**所有下载**的 TLS 验证；
         // 以前只要改 launcher.json 就能置位（绕过 UI 的风险确认）。
         // 现在把它当成「需要授权的开关」：acks.json 里没有确认纪录就强制关闭。

@@ -539,8 +539,9 @@ public final class VersionInstaller {
             return "";
         }
         String file = snapshot.currentFile();
+        String host = snapshot.host() == null || snapshot.host().isBlank() ? "" : "[" + snapshot.host() + "] ";
         String base = snapshot.completed() + "/" + snapshot.total();
-        return file == null || file.isBlank() ? base : base + " · " + file;
+        return file == null || file.isBlank() ? base : base + " · " + host + file;
     }
 
     // ---------- 工具 ----------

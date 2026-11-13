@@ -12,6 +12,7 @@ import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
+import javafx.scene.control.PasswordField;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Spinner;
 import javafx.scene.control.TextField;
@@ -60,7 +61,9 @@ public final class SettingsPage extends VBox implements MclPage {
 
     private final TextField frpPath = new TextField();
     private final CheckBox autoLanguage = new CheckBox(I18n.t("settings.auto_language"));
-    private final TextField microsoftClientId = new TextField();
+    private final TextField microsoftClientId = new PasswordField();
+    /** CurseForge API key（遮蔽显示；空 = 走镜像源）。 */
+    private final PasswordField curseforgeApiKey = new PasswordField();
     /** 「当前生效的客户端 ID 来自哪里」——避免发版时拿错 ID / 排查登录问题。 */
     private final Label microsoftClientIdSource = new Label();
     private final VBox jdkList = new VBox(4);
@@ -73,6 +76,9 @@ public final class SettingsPage extends VBox implements MclPage {
         setSpacing(12);
 
         for (LauncherSettings.Source value : LauncherSettings.Source.values()) {
+            if (!value.selectable()) {
+                continue;
+            }
             source.getItems().add(value.display());
         }
         for (String tag : I18n.supportedLocales()) {
@@ -285,6 +291,14 @@ public final class SettingsPage extends VBox implements MclPage {
         proxy.setPromptText("127.0.0.1:7890 或 socks5://127.0.0.1:1080");
         microsoftClientId.setPromptText("00000000-0000-0000-0000-000000000000");
         GridPane grid = grid();
+        // 标签列保底按文字宽度：ID / key 填满 36+ 字符时，标签不会被挤成「Mic...」
+        javafx.scene.layout.ColumnConstraints labelColumn =
+                new javafx.scene.layout.ColumnConstraints();
+        labelColumn.setMinWidth(javafx.scene.layout.Region.USE_PREF_SIZE);
+        javafx.scene.layout.ColumnConstraints valueColumn =
+                new javafx.scene.layout.ColumnConstraints();
+        valueColumn.setHgrow(Priority.ALWAYS);
+        grid.getColumnConstraints().setAll(labelColumn, valueColumn);
         grid.addRow(0, new Label(I18n.t("settings.proxy")), proxy);
         // P0-2：勾选时二次确认，避免使用者以为只影响下载
         insecureTls.setOnAction(e -> {
@@ -312,8 +326,15 @@ public final class SettingsPage extends VBox implements MclPage {
                 "https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/CreateApplicationBlade"));
         HBox clientHelp = new HBox(8, help, azure);
         grid.addRow(4, new Label(""), clientHelp);
+        // CurseForge API key：跟客户端 ID 一样遮蔽显示；留空则 CurseForge 源走镜像
+        curseforgeApiKey.setPromptText(I18n.t("settings.curseforge_key_prompt"));
+        grid.addRow(5, new Label(I18n.t("settings.curseforge_key")), curseforgeApiKey);
+        Label curseforgeHint = UiKit.catHint(I18n.t("settings.curseforge_key_hint"));
+        curseforgeHint.setWrapText(true);
+        grid.addRow(6, new Label(""), curseforgeHint);
         HBox.setHgrow(proxy, Priority.ALWAYS);
         HBox.setHgrow(microsoftClientId, Priority.ALWAYS);
+        HBox.setHgrow(curseforgeApiKey, Priority.ALWAYS);
         Label hint = UiKit.catHint(I18n.t("settings.microsoft_client_hint"));
         hint.setWrapText(true);
         return card(I18n.t("settings.section.network"),
@@ -439,6 +460,8 @@ public final class SettingsPage extends VBox implements MclPage {
         memoryRow.setAlignment(Pos.CENTER_LEFT);
         // §4.4 关于页的「第三方内容与免责」：与设定页/工具页用同一套口径，避免两处说法不一致
         Label disclaimer = UiKit.catHint(I18n.t("settings.third_party_disclaimer"));
+        // 中英对照表来自 HMCL（GPL-3.0）；本项目同为 GPL-3.0，按协议在此声明来源
+        Label credits = UiKit.catHint(I18n.t("settings.credits"));
         disclaimer.setWrapText(true);
         Button github = new Button("GitHub");
         github.setOnAction(e -> com.brisklauncher.mcl.ui.DesktopActions.openUrl("https://github.com/Xiaojiu114514/Brisk-Launcher"));
@@ -454,7 +477,7 @@ public final class SettingsPage extends VBox implements MclPage {
                 new Label("Java 21 · JavaFX · JPMS"),
                 repoRow, dataLabel, openData, memoryRow,
                 UiKit.catHint(I18n.t("settings.security")),
-                UiKit.title(I18n.t("settings.third_party_section")), disclaimer));
+                UiKit.title(I18n.t("settings.third_party_section")), disclaimer, credits));
     }
 
     /** 目前堆/非堆用量（正式發行版用 -Xmx192m 啟動，數字不該無限長大）。 */
@@ -473,7 +496,9 @@ public final class SettingsPage extends VBox implements MclPage {
 
     private void loadSettings() {
         LauncherSettings settings = context.settings();
-        source.getSelectionModel().select(settings.source().display());
+        LauncherSettings.Source savedSource = settings.source() == LauncherSettings.Source.BMCLAPI
+                ? LauncherSettings.Source.AUTO : settings.source();
+        source.getSelectionModel().select(savedSource.display());
         customMirror.setText(settings.customMirror());
         customMirror.setDisable(settings.source() != LauncherSettings.Source.CUSTOM);
         concurrency.getValueFactory().setValue(settings.concurrency());
@@ -491,6 +516,7 @@ public final class SettingsPage extends VBox implements MclPage {
         autoLanguage.setSelected(settings.autoLanguage());
         microsoftClientId.setText(settings.microsoftClientId());
         refreshClientIdSource();
+        curseforgeApiKey.setText(settings.curseforgeApiKey());
         autoUpdate.setSelected(settings.autoUpdate());
         autoInstall.setSelected(settings.autoInstallUpdate());
         updateChannel.setValue("gitee".equalsIgnoreCase(settings.updateChannel()) ? "Gitee" : "GitHub");
@@ -565,7 +591,8 @@ public final class SettingsPage extends VBox implements MclPage {
                 autoUpdate.isSelected(),
                 autoInstall.isSelected(),
                 "Gitee".equalsIgnoreCase(updateChannel.getValue()) ? "gitee" : "github",
-                com.brisklauncher.mcl.setting.LauncherSettings.DEFAULT_UPDATE_REPO);
+                com.brisklauncher.mcl.setting.LauncherSettings.DEFAULT_UPDATE_REPO,
+                curseforgeApiKey.getText() == null ? "" : curseforgeApiKey.getText().trim());
     }
 
     private void refreshJdkList() {

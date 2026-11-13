@@ -16,6 +16,80 @@ import java.util.Set;
  */
 public final class SearchTerms {
 
+    /** 繁 → 简（只覆盖常用的几百个字；不做全表转换，够搜索用）。 */
+    private static final String TRAD = "戲劇優化體記憶體啟動設定檔案讀寫網路連線圖片載入錯誤修復版本管理器"
+            + "數據資料夾資源模組伺服器光影著色器動畫任務統計顯示隱藏選項開關確認取消刪除新增編輯"
+            + "繁體简体臺灣香港語言時間長度速度音樂聲音畫面視窗按鍵滑鼠鍵盤支援解決問題檢查更新安裝";
+    private static final String SIMP = "戏剧优化体记忆体启动设定档案读写网路连线图片载入错误修复版本管理器"
+            + "数据资料夹资源模组伺服器光影着色器动画任务统计显示隐藏选项开关确认取消删除新增编辑"
+            + "繁体简体台湾香港语言时间长度速度音乐声音画面视窗按键滑鼠键盘支援解决问题检查更新安装";
+
+    /** 两岸用语差异：台湾用词 → 大陆常用说法（搜索时两个都试）。 */
+    private static final String[][] CROSS_STRAIT = {
+            {"伺服器", "服务器 server"},
+            {"模組", "模组 mod"},
+            {"資料夾", "文件夹 folder"},
+            {"記憶體", "内存 memory"},
+            {"硬碟", "硬盘 disk"},
+            {"網路", "网络 network"},
+            {"預設", "默认 default"},
+            {"設定", "设置 settings"},
+            {"檔案", "文件 file"},
+            {"著色器", "光影 shader"},
+            {"光影", "着色器 shader"},
+            {"語系", "语言 language locale"},
+            {"解析度", "分辨率 resolution"},
+            {"螢幕", "屏幕 screen"},
+            {"程式", "程序 program"},
+            {"最佳化", "优化 optimization"},
+    };
+
+    /** 把查询归一化：小写、去空白、繁转简。 */
+    public static String normalize(String query) {
+        if (query == null) {
+            return "";
+        }
+        String value = query.trim().toLowerCase(java.util.Locale.ROOT);
+        StringBuilder builder = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            int index = TRAD.indexOf(ch);
+            builder.append(index >= 0 ? SIMP.charAt(index) : ch);
+        }
+        return builder.toString();
+    }
+
+    /**
+     * 把查询扩展成一组检索词：原始输入 + 归一化结果 + 对照表里的英文名/slug + 两岸用语。
+     *
+     * <p>调用方把返回的每个词都拿去查，命中任意一个都算结果（OR 语义）。
+     */
+    public static Set<String> expandQuery(String query) {
+        Set<String> result = new LinkedHashSet<>();
+        if (query == null || query.isBlank()) {
+            return result;
+        }
+        String raw = query.trim();
+        String normalized = normalize(raw);
+        result.add(raw);
+        if (!normalized.equals(raw)) {
+            result.add(normalized);
+        }
+        // 中英对照表（HMCL 数据）
+        result.addAll(LocalizedNames.expandChinese(normalized));
+        // 两岸用语
+        for (String[] pair : CROSS_STRAIT) {
+            if (normalized.contains(pair[0]) || raw.contains(pair[0])) {
+                for (String word : pair[1].split(" ")) {
+                    result.add(word);
+                }
+            }
+        }
+        return result;
+    }
+
+
+
     /** 詞表：中文 → 追加的英文關鍵詞（可多個）。 */
     private static final List<String[]> DICTIONARY = List.of(
             new String[]{"优化", "optimization performance sodium lithium"},
@@ -174,15 +248,28 @@ public final class SearchTerms {
             return "";
         }
         String lower = query.toLowerCase(Locale.ROOT);
+        String normalized = normalize(query);
+        // 对照表命中时只回**一个**最佳词（slug / 英文名）：Modrinth 的 q 是整串匹配，
+        // 把所有别名拼起来会变成零结果（实测「自定义局域网联机」被拼成十几词后搜不到）。
+        String best = LocalizedNames.bestQueryLoose(normalized);
+        if (best != null && !best.isBlank()) {
+            return best;
+        }
         Set<String> extras = new LinkedHashSet<>();
         for (String[] entry : DICTIONARY) {
-            if (lower.contains(entry[0])) {
+            if (lower.contains(entry[0]) || normalized.contains(normalize(entry[0]))) {
                 for (String word : entry[1].split(" ")) {
                     if (!word.isBlank()) {
                         extras.add(word);
                     }
                 }
             }
+        }
+        // 1) HMCL 的中英对照表：中文名命中就带上英文名 / slug
+        extras.addAll(LocalizedNames.expandChinese(normalized));
+        // 2) 两岸用语 + 繁简：把归一化后的词也一起送去搜
+        if (!normalized.equals(lower) && !normalized.isBlank()) {
+            extras.add(normalized);
         }
         return String.join(" ", extras);
     }

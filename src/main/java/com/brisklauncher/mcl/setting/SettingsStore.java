@@ -64,6 +64,10 @@ public final class SettingsStore {
             String encryptedClientId = com.brisklauncher.mcl.security.SecretBox.encrypt(
                     settings.microsoftClientId());
             root.put("microsoftClientId", encryptedClientId == null ? "" : encryptedClientId);
+            // CurseForge API key 同样不明文落盘
+            String encryptedCurseForgeKey = com.brisklauncher.mcl.security.SecretBox.encrypt(
+                    settings.curseforgeApiKey());
+            root.put("curseforgeApiKey", encryptedCurseForgeKey == null ? "" : encryptedCurseForgeKey);
             root.put("autoLanguage", settings.autoLanguage());
         root.put("autoUpdate", settings.autoUpdate());
             root.put("autoInstallUpdate", settings.autoInstallUpdate());
@@ -108,6 +112,8 @@ public final class SettingsStore {
             // 读到时直接丢弃（下次保存会写回空值），避免使用者被这条假数据卡住。
             String storedClientId = com.brisklauncher.mcl.security.SecretBox.decrypt(
                     node.path("microsoftClientId").asText(""));
+            String storedCurseForgeKey = com.brisklauncher.mcl.security.SecretBox.decrypt(
+                    node.path("curseforgeApiKey").asText(""));
             if (storedClientId.equals(LauncherSettings.DEFAULT_UPDATE_REPO)
                     || storedClientId.equals(LauncherSettings.GITEE_UPDATE_REPO)) {
                 SafeLog.info("已丢弃误写入的客户端 ID（旧版本 defaults 参数顺序错误）");
@@ -130,7 +136,8 @@ public final class SettingsStore {
                     node.path("autoUpdate").asBoolean(defaults.autoUpdate()),
                     node.path("autoInstallUpdate").asBoolean(defaults.autoInstallUpdate()),
                     node.path("updateChannel").asText(defaults.updateChannel()),
-                    node.path("updateRepo").asText(defaults.updateRepo()));
+                    node.path("updateRepo").asText(defaults.updateRepo()),
+                    storedCurseForgeKey);
         } catch (Exception e) {
             SafeLog.warn("读取 launcher.json 失败，回退默认设置");
             return defaults;

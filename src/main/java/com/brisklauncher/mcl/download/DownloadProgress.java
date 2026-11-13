@@ -1,7 +1,13 @@
 package com.brisklauncher.mcl.download;
 
 /** 下载进度快照，直接喂给 UI 进度条。 */
-public record DownloadProgress(int completed, int total, long bytesDone, long bytesTotal, String currentFile) {
+public record DownloadProgress(int completed, int total, long bytesDone, long bytesTotal,
+                               String currentFile, String host) {
+
+    /** 兼容旧调用：没有来源主机时用空串。 */
+    public DownloadProgress(int completed, int total, long bytesDone, long bytesTotal, String currentFile) {
+        this(completed, total, bytesDone, bytesTotal, currentFile, "");
+    }
 
     public double ratio() {
         if (bytesTotal > 0) {
@@ -13,6 +19,6 @@ public record DownloadProgress(int completed, int total, long bytesDone, long by
     }
 
     public static DownloadProgress idle() {
-        return new DownloadProgress(0, 0, 0, 0, "");
+        return new DownloadProgress(0, 0, 0, 0, "", "");
     }
 }

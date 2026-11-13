@@ -10,11 +10,13 @@ import com.brisklauncher.mcl.download.DownloadTask;
 import com.brisklauncher.mcl.i18n.I18n;
 import com.brisklauncher.mcl.game.install.InstallProgress;
 import com.brisklauncher.mcl.modpack.ModpackIndex;
+import com.brisklauncher.mcl.download.remote.CurseForgeClient;
 import com.brisklauncher.mcl.download.remote.LoaderMetaClient;
 import com.brisklauncher.mcl.download.remote.MojangApi;
 import com.brisklauncher.mcl.download.remote.ModrinthClient;
 import com.brisklauncher.mcl.download.remote.SearchTerms;
 import com.brisklauncher.mcl.security.SafeLog;
+import com.brisklauncher.mcl.setting.LauncherSettings;
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.geometry.Insets;
@@ -68,6 +70,49 @@ public final class DownloadPage extends HBox implements MclPage {
     private record Category(String key, String displayKey, String projectType) {
     }
 
+    /** 搜索源：Modrinth（默认，免密钥）与 CurseForge（构建期注入 API key）。 */
+    private enum Source {
+        MODRINTH("download.source.modrinth"),
+        CURSEFORGE("download.source.curseforge");
+
+        private final String labelKey;
+
+        Source(String labelKey) {
+            this.labelKey = labelKey;
+        }
+
+        String label() {
+            return I18n.t(labelKey);
+        }
+    }
+
+    /**
+     * 搜索结果的一条。
+     *
+     * <p>CurseForge 的项目没有作者 / 环境 / 分类 / 游戏版本字段，这里统一包成
+     * {@link ModrinthClient.Project}（缺的字段留空），列表、详情与安装流程就不必为
+     * 两个来源各写一份；真正来自哪个源由 {@link #source()} 决定。
+     */
+    private record SearchHit(Source source, ModrinthClient.Project project, String curseForgeId) {
+
+        static SearchHit modrinth(ModrinthClient.Project project) {
+            return new SearchHit(Source.MODRINTH, project, "");
+        }
+
+        static SearchHit curseForge(CurseForgeClient.Project project) {
+            return new SearchHit(Source.CURSEFORGE,
+                    new ModrinthClient.Project(project.id(), project.slug(), project.title(),
+                            project.summary(), "", project.downloads(), project.iconUrl(),
+                            "", "", "", List.of(), List.of()),
+                    project.id());
+        }
+    }
+
+    /** 一次搜索的参数（两个来源共用；CurseForge 用不到的字段忽略）。 */
+    private record SearchQuery(String text, String searchText, boolean translated, String loader,
+                               String mcVersion, List<String> environments, String sort, int offset) {
+    }
+
     private static final List<Category> CATEGORIES = List.of(
             new Category("version", "download.category.version", null),
             new Category("mod", "download.category.mod", "mod"),
@@ -80,6 +125,10 @@ public final class DownloadPage extends HBox implements MclPage {
     private final List<MojangApi.VersionMeta> manifest = new ArrayList<>();
     private Category currentCategory = CATEGORIES.get(0);
     private boolean manifestLoaded;
+    /** 清单请求正在飞：构造 + onShown 连续建页时不要重复拉。 */
+    private boolean manifestLoading;
+    /** 等清单回来再填「游戏版本」下拉的搜索面板（避免每个面板各拉一次 manifest）。 */
+    private final List<ComboBox<String>> pendingVersionCombos = new ArrayList<>();
     private ListView<MojangApi.VersionMeta> versionList;
     private Label versionStatus;
     private ComboBox<GameDirectory> instanceRootCombo;
@@ -88,6 +137,8 @@ public final class DownloadPage extends HBox implements MclPage {
     private String pendingSearch;
     /** 下一次建目標實例下拉框時要強制選中的實例（前置依賴圖跳轉用，只用一次）。 */
     private String pendingInstanceId;
+    /** 上次用過的搜尋來源（同一支啟動器內記住；重開預設 Modrinth）。 */
+    private static Source rememberedSource = Source.MODRINTH;
     private final java.util.Map<String, ToggleButton> categoryButtons = new java.util.HashMap<>();
 
     /**
@@ -170,6 +221,7 @@ public final class DownloadPage extends HBox implements MclPage {
         iconCache.clear();
         com.brisklauncher.mcl.util.RemoteImages.resetFailed();
         manifest.clear();
+        pendingVersionCombos.clear();
         versionFilters.clear();
         categoryButtons.clear();
         // 注意：只清数据、不把控件字段置 null；后台回调可能晚一步到达，
@@ -316,6 +368,11 @@ public final class DownloadPage extends HBox implements MclPage {
             refreshVersionList();
             return;
         }
+        if (manifestLoading) {
+            // 构造 + onShown 可能连续触发两次建页：清单只拉一次
+            return;
+        }
+        manifestLoading = true;
         if (versionStatus != null) {
             versionStatus.setText(I18n.t("download.loading"));
         }
@@ -323,13 +380,21 @@ public final class DownloadPage extends HBox implements MclPage {
             try {
                 List<MojangApi.VersionMeta> versions = context.mojang().versions(true);
                 Platform.runLater(() -> {
+                    manifestLoading = false;
                     manifest.clear();
                     manifest.addAll(versions);
                     manifestLoaded = true;
                     refreshVersionList();
+                    // 搜索面板的「游戏版本」下拉等这份清单，一起填掉
+                    for (ComboBox<String> pending : new ArrayList<>(pendingVersionCombos)) {
+                        addReleaseVersions(pending);
+                    }
+                    pendingVersionCombos.clear();
                 });
             } catch (Exception e) {
                 Platform.runLater(() -> {
+                    manifestLoading = false;
+                    pendingVersionCombos.clear();
                     if (versionStatus != null) {
                         versionStatus.setText(e.getMessage());
                     }
@@ -596,11 +661,33 @@ public final class DownloadPage extends HBox implements MclPage {
         HBox.setHgrow(query, Priority.ALWAYS);
         Button searchButton = new Button(I18n.t("common.search"));
 
+        // 下载源：Modrinth / CurseForge。CurseForge 需要构建期注入的 API key；
+        // 没有 key 时**不禁用**选项，切过去在结果区提示「API 为空」。
+        ComboBox<Source> source = new ComboBox<>();
+        source.getItems().setAll(Source.values());
+        // 下拉项与按钮都用本地化名称（枚举的 toString 不能带 i18n）
+        source.setConverter(new javafx.util.StringConverter<>() {
+            @Override
+            public String toString(Source entry) {
+                return entry == null ? "" : entry.label();
+            }
+
+            @Override
+            public Source fromString(String text) {
+                return null;
+            }
+        });
+        // 开发期：截图用，直接选 CurseForge（-Dmcl.dev.downloadsource=curseforge）
+        Source devSource = "curseforge".equalsIgnoreCase(
+                System.getProperty("mcl.dev.downloadsource", ""))
+                ? Source.CURSEFORGE : rememberedSource;
+        source.getSelectionModel().select(devSource);
+
         ComboBox<String> loader = new ComboBox<>();
         boolean loaderVisible = "mod".equals(category.key()) || "modpack".equals(category.key());
         if (loaderVisible) {
             loader.getItems().add(I18n.t("download.all_loaders"));
-            loader.getItems().addAll("fabric", "forge", "neoforge", "");
+            loader.getItems().addAll("fabric", "forge", "neoforge");
             loader.getSelectionModel().selectFirst();
         }
         loader.setVisible(loaderVisible);
@@ -617,7 +704,7 @@ public final class DownloadPage extends HBox implements MclPage {
         server.setVisible(environmentVisible);
         server.setManaged(environmentVisible);
 
-        ListView<ModrinthClient.Project> results = new ListView<>();
+        ListView<SearchHit> results = new ListView<>();
         results.setPlaceholder(UiKit.catHint(I18n.t("download.popular_placeholder")));
         results.setCellFactory(view -> new ProjectCell());
         VBox.setVgrow(results, Priority.ALWAYS);
@@ -714,7 +801,7 @@ public final class DownloadPage extends HBox implements MclPage {
         detailPane.setPadding(new Insets(10));
         install.setMaxWidth(Double.MAX_VALUE);
 
-        AtomicReference<ModrinthClient.Project> selectedProject = new AtomicReference<>();
+        AtomicReference<SearchHit> selectedProject = new AtomicReference<>();
         AtomicReference<ModrinthClient.VersionFile> selectedFile = new AtomicReference<>();
         AtomicReference<List<ModrinthClient.Dependency>> selectedDeps =
                 new AtomicReference<>(List.of());
@@ -858,9 +945,9 @@ public final class DownloadPage extends HBox implements MclPage {
         status.setWrapText(true);
 
         Runnable updateDependencies = () -> {
-            ModrinthClient.Project project = selectedProject.get();
+            SearchHit hit = selectedProject.get();
             ModrinthClient.VersionFile file = selectedFile.get();
-            if (project == null || file == null) {
+            if (hit == null || file == null) {
                 return;
             }
             selectedDeps.set(file.dependencies());
@@ -875,6 +962,10 @@ public final class DownloadPage extends HBox implements MclPage {
             dependencyLabel.setText(I18n.t("download.loading"));
             CompletableFuture.supplyAsync(() -> dependencyNames(required))
                     .thenAccept(names -> Platform.runLater(() -> {
+                        // 玩家已经换版本 / 清空详情：旧请求的依赖名不要再写回去
+                        if (selectedFile.get() != file) {
+                            return;
+                        }
                         dependencyLabel.setText(I18n.t("download.detail.deps_list",
                                 String.join("、", names)));
                         install.setDisable(false);
@@ -882,19 +973,21 @@ public final class DownloadPage extends HBox implements MclPage {
         };
 
         Runnable showDetail = () -> {
-            ModrinthClient.Project project = selectedProject.get();
-            if (project == null) {
+            SearchHit hit = selectedProject.get();
+            if (hit == null) {
                 clearDetail.run();
                 return;
             }
+            ModrinthClient.Project project = hit.project();
             detailTitle.setText(project.title());
-            detailMeta.setText(project.author() + " · " + project.downloads() + " downloads");
+            detailMeta.setText(metaLine(hit));
             detailDesc.setText(project.description());
-            detailTags.getChildren().setAll(tagsFor(project));
+            detailTags.getChildren().setAll(tagsFor(hit));
             // 外部连结：预设收起（只显示一个小开关），需要时再展开，避免压缩版本清单
             detailLinks.getChildren().setAll(
                     externalLink(I18n.t("download.open.modrinth"), modrinthUrl(project), status),
-                    externalLink(I18n.t("download.open.curseforge"), curseforgeUrl(project), status),
+                    externalLink(I18n.t("download.open.curseforge"),
+                            curseforgeUrl(hit, category), status),
                     externalLink(I18n.t("download.open.mcmod"), mcmodUrl(project), status));
             linksToggle.setSelected(false);
             linksToggle.setVisible(true);
@@ -922,26 +1015,65 @@ public final class DownloadPage extends HBox implements MclPage {
             dependencyLabel.setText(I18n.t("download.detail.no_deps"));
             String loaderValue = loaderValue(loader);
             String mcValue = mcValue(gameVersion);
+            if (hit.source() == Source.CURSEFORGE) {
+                // CurseForge 只有一个「最新相容文件」：没有明确筛选时跟随目标实例，
+                // 免得默认给玩家装一个跟实例版本对不上的文件。
+                GameInstance target = instanceCombo.getValue();
+                String cfLoader = loaderValue;
+                String cfMc = mcValue;
+                if (target != null) {
+                    if (cfLoader == null) {
+                        String key = instanceLoaderKey(target);
+                        cfLoader = "vanilla".equals(key) || "datapack".equals(key) ? null : key;
+                    }
+                    if (cfMc == null) {
+                        cfMc = target.mcVersion();
+                    }
+                }
+                showCurseForgeFile(hit, cfLoader, cfMc, instanceCombo, versions, install,
+                        dependencyLabel, detailTags, populate, selectedProject,
+                        !"modpack".equals(category.key()));
+                return;
+            }
             CompletableFuture.supplyAsync(() -> context.modrinth().versions(project.id(),
                             loaderValue == null ? List.of() : List.of(loaderValue),
                             mcValue == null ? List.of() : List.of(mcValue)))
                     .thenAccept(files -> Platform.runLater(() -> {
+                        // 玩家已经切走 / 切了来源 / 清空详情：旧请求的结果不能再填进详情卡
+                        if (selectedProject.get() != hit) {
+                            return;
+                        }
                         versions.setDisable(files.isEmpty());
                         populate.accept(files, instanceCombo.getValue());
                         if (files.isEmpty()) {
                             dependencyLabel.setText(I18n.t("download.version_none"));
                         }
                     })).exceptionally(error -> {
-                        Platform.runLater(() -> dependencyLabel.setText(
-                                I18n.t("download.version_fetch_failed", rootMessage(error))));
+                        Platform.runLater(() -> {
+                            if (selectedProject.get() == hit) {
+                                dependencyLabel.setText(
+                                        I18n.t("download.version_fetch_failed", rootMessage(error)));
+                            }
+                        });
                         return null;
                     });
         };
 
+        // 快速上下选（键盘 / 滚轮扫过）时不要每个条目都发一次「版本 / 文件」请求：
+        // 选中后等 250ms，只有停下来才真正去取详情。
+        javafx.animation.PauseTransition detailDebounce =
+                new javafx.animation.PauseTransition(javafx.util.Duration.millis(250));
+        detailDebounce.setOnFinished(event -> showDetail.run());
         results.getSelectionModel().selectedItemProperty().addListener((obs, oldValue, value) -> {
             selectedProject.set(value);
             selectedFile.set(null);
-            showDetail.run();
+            install.setDisable(true);
+            detailDebounce.stop();
+            if (value == null) {
+                showDetail.run();
+            } else {
+                detailDebounce.playFromStart();
+            }
         });
         versions.getSelectionModel().selectedItemProperty().addListener((obs, oldValue, item) -> {
             ModrinthClient.VersionFile file = item != null
@@ -962,12 +1094,42 @@ public final class DownloadPage extends HBox implements MclPage {
         HBox pager = new HBox(8, previousPage, pageLabel, nextPage);
         pager.setAlignment(Pos.CENTER_LEFT);
 
+        java.util.concurrent.atomic.AtomicInteger searchGeneration =
+                new java.util.concurrent.atomic.AtomicInteger(0);
+        // 同一条件的搜索在 600ms 内只打一次：防双击 / 重复事件造成的并发请求
+        java.util.concurrent.atomic.AtomicReference<String> lastSearchSignature =
+                new java.util.concurrent.atomic.AtomicReference<>("");
+        java.util.concurrent.atomic.AtomicLong lastSearchAt =
+                new java.util.concurrent.atomic.AtomicLong(0);
         java.util.function.IntConsumer runSearch = requestedPage -> {
+            int requested = Math.max(0, requestedPage);
             String text = query.getText() == null ? "" : query.getText().trim();
-            page.set(Math.max(0, requestedPage));
+            Source selectedSource = source.getValue() == null ? Source.MODRINTH : source.getValue();
+            String loaderValue = loaderValue(loader);
+            String mcValue = mcValue(gameVersion);
+            String signature = selectedSource + "|" + text + "|" + loaderValue + "|" + mcValue
+                    + "|" + client.isSelected() + "|" + server.isSelected() + "|" + requested;
+            long now = System.currentTimeMillis();
+            if (signature.equals(lastSearchSignature.get()) && now - lastSearchAt.get() < 600L) {
+                return;
+            }
+            lastSearchSignature.set(signature);
+            lastSearchAt.set(now);
+            // 切来源 / 翻页会产生多个后台请求；只让最后一次的结果上屏，避免旧结果盖新的
+            int generation = searchGeneration.incrementAndGet();
+            page.set(requested);
             status.setText(I18n.t("download.loading"));
             results.getItems().clear();
             clearDetail.run();
+            rememberedSource = selectedSource;
+            boolean curseForge = selectedSource == Source.CURSEFORGE;
+            if (curseForge && mirrorFirst()) {
+                // 镜像回源慢（实测 10–17 秒）：先说明一下，别让人以为卡死
+                status.setText(I18n.t("download.loading") + "  ·  "
+                        + I18n.t("download.curseforge.mirror_slow"));
+            }
+            // 没有 key 也照常搜：CurseForgeClient 会走镜像源（设置页下载源决定先跑哪个）
+            results.setPlaceholder(UiKit.catHint(I18n.t("download.popular_placeholder")));
             List<String> environments = new ArrayList<>();
             if (client.isSelected()) {
                 environments.add("client");
@@ -975,78 +1137,114 @@ public final class DownloadPage extends HBox implements MclPage {
             if (server.isSelected()) {
                 environments.add("server");
             }
-            String loaderValue = loaderValue(loader);
-            String mcValue = mcValue(gameVersion);
-            List<String> loaders = loaderValue == null ? List.of() : List.of(loaderValue);
-            List<String> versionsList = mcValue == null ? List.of() : List.of(mcValue);
             String sort = text.isEmpty() ? "downloads" : null;
             int offset = page.get() * 20;
-            // 中文关键词：先用翻好的英文去搜（混着中文 Modrinth 基本搜不到），
+            // 中文关键词：先用翻好的英文去搜（混着中文 Modrinth / CurseForge 基本搜不到），
             // 英文也没结果时再退回原文。
             String englishQuery = SearchTerms.hasCjk(text) ? SearchTerms.translate(text) : "";
             boolean translated = !englishQuery.isBlank();
-            String searchText = translated ? englishQuery : text;
+            SearchQuery searchQuery = new SearchQuery(text, translated ? englishQuery : text,
+                    translated, loaderValue, mcValue, environments, sort, offset);
 
-            java.util.function.Consumer<ModrinthClient.SearchResult> apply = result -> {
-                if (!result.isSuccess()) {
+            java.util.function.BiConsumer<List<SearchHit>, Integer> applyHits = (hits, total) -> {
+                if (total <= 0) {
                     results.getItems().clear();
-                    status.setText(result.errorMessage());
-                    return;
-                }
-                totalHits.set(result.totalHits());
-                results.getItems().setAll(result.projects());
-                if (result.totalHits() == 0) {
                     status.setText(I18n.t("download.empty_result"));
                     previousPage.setDisable(page.get() <= 0);
                     nextPage.setDisable(true);
                     pageLabel.setText("");
                     return;
                 }
+                results.getItems().setAll(hits);
+                int pages = Math.max(1, (total + 19) / 20);
                 String base = text.isEmpty()
-                        ? I18n.t("download.popular_count", result.totalHits())
-                        : I18n.t("download.total", result.totalHits());
-                status.setText(base + "  ·  " + I18n.t("download.page",
-                        page.get() + 1, Math.max(1, (result.totalHits() + 19) / 20))
+                        ? I18n.t("download.popular_count", total)
+                        : I18n.t("download.total", total);
+                status.setText(base + "  ·  " + I18n.t("download.page", page.get() + 1, pages)
                         + (translated ? "  " + I18n.t("download.chinese_hint") : ""));
                 previousPage.setDisable(page.get() <= 0);
-                nextPage.setDisable(page.get() + 1 >= (result.totalHits() + 19) / 20);
-                pageLabel.setText(I18n.t("download.page",
-                        page.get() + 1, Math.max(1, (result.totalHits() + 19) / 20)));
-                if (!result.projects().isEmpty()) {
+                nextPage.setDisable(page.get() + 1 >= pages);
+                pageLabel.setText(I18n.t("download.page", page.get() + 1, pages));
+                if (!hits.isEmpty()) {
                     results.getSelectionModel().selectFirst();
                 }
             };
+            java.util.function.Consumer<String> showError = message -> {
+                results.getItems().clear();
+                results.setPlaceholder(UiKit.catHint(message));
+                status.setText(message);
+                previousPage.setDisable(true);
+                nextPage.setDisable(true);
+                pageLabel.setText("");
+            };
 
-            CompletableFuture.supplyAsync(() -> context.modrinth().search(searchText,
-                            category.projectType(), loaders, versionsList, environments, sort, offset))
-                    .thenAccept(result -> Platform.runLater(() -> {
-                        if (translated && result.isSuccess() && result.totalHits() == 0
-                                && !text.equals(searchText)) {
-                            // 翻译没命中：用原文再搜一次
-                            CompletableFuture.supplyAsync(() -> context.modrinth().search(text,
-                                            category.projectType(), loaders, versionsList,
-                                            environments, sort, offset))
-                                    .thenAccept(fallback -> Platform.runLater(() -> apply.accept(fallback)));
-                            return;
-                        }
-                        apply.accept(result);
-                    }));
+            if (curseForge) {
+                searchCurseForge(category, searchQuery, result -> {
+                    if (searchGeneration.get() != generation) {
+                        return;
+                    }
+                    if (!result.isSuccess()) {
+                        showError.accept(curseForgeError(result.errorMessage()));
+                        return;
+                    }
+                    totalHits.set(result.totalHits());
+                    applyHits.accept(result.projects().stream().map(SearchHit::curseForge).toList(),
+                            result.totalHits());
+                    if (result.viaMirror()) {
+                        // 让玩家看得出这次是镜像返回的
+                        status.setText(status.getText() + "  ·  "
+                                + I18n.t("download.curseforge.via_mirror"));
+                    }
+                });
+                return;
+            }
+            searchModrinth(category, searchQuery, result -> {
+                if (searchGeneration.get() != generation) {
+                    return;
+                }
+                if (!result.isSuccess()) {
+                    showError.accept(result.errorMessage());
+                    return;
+                }
+                totalHits.set(result.totalHits());
+                applyHits.accept(result.projects().stream().map(SearchHit::modrinth).toList(),
+                        result.totalHits());
+            });
         };
         previousPage.setOnAction(e -> runSearch.accept(page.get() - 1));
         nextPage.setOnAction(e -> runSearch.accept(page.get() + 1));
         searchButton.setOnAction(e -> runSearch.accept(0));
         query.setOnAction(e -> runSearch.accept(0));
+        // CurseForge 的额外说明：只在选 CurseForge 时显示（无前置一键安装 / 镜像慢 / 官方要 key）
+        Label sourceHint = UiKit.catHint(I18n.t("download.curseforge.hint"));
+        sourceHint.setWrapText(true);
+        boolean initialCurseForge = source.getValue() == Source.CURSEFORGE;
+        sourceHint.setVisible(initialCurseForge);
+        sourceHint.setManaged(initialCurseForge);
+        // 切换来源：清空后立刻重搜；客户端/服务端筛选只对 Modrinth 有意义（CurseForge 不支援）
+        source.valueProperty().addListener((obs, oldValue, value) -> {
+            boolean curseForge = value == Source.CURSEFORGE;
+            client.setVisible(environmentVisible && !curseForge);
+            client.setManaged(environmentVisible && !curseForge);
+            server.setVisible(environmentVisible && !curseForge);
+            server.setManaged(environmentVisible && !curseForge);
+            sourceHint.setVisible(curseForge);
+            sourceHint.setManaged(curseForge);
+            if (value != null) {
+                runSearch.accept(0);
+            }
+        });
 
         install.setOnAction(e -> {
-            ModrinthClient.Project project = selectedProject.get();
+            SearchHit hit = selectedProject.get();
             ModrinthClient.VersionFile file = selectedFile.get();
-            if (project == null || file == null) {
+            if (hit == null || file == null) {
                 return;
             }
             GameDirectory root = rootCombo.getValue();
             GameInstance instance = instanceCombo.getValue();
             if ("modpack".equals(category.key())) {
-                importModpackProject(project, root, loaderValue(loader), mcValue(gameVersion));
+                importModpackProject(hit, root, mcValue(gameVersion));
                 return;
             }
             if (instance == null) {
@@ -1054,13 +1252,16 @@ public final class DownloadPage extends HBox implements MclPage {
                         I18n.t("download.no_instance"));
                 return;
             }
-            installWithDependencies(project, file, instance, category.key(),
+            installWithDependencies(hit, file, instance, category.key(),
                     loaderValue(loader), mcValue(gameVersion));
         });
 
         HBox searchBar = new HBox(8, query, searchButton);
-        HBox filters = new HBox(10, client, server, loader, gameVersion);
+        HBox sourceBox = new HBox(6, new Label(I18n.t("download.source")), source);
+        sourceBox.setAlignment(Pos.CENTER_LEFT);
+        HBox filters = new HBox(10, sourceBox, client, server, loader, gameVersion);
         filters.setAlignment(Pos.CENTER_LEFT);
+        VBox filterBox = new VBox(6, filters, sourceHint);
         HBox targetRow = "modpack".equals(category.key())
                 ? new HBox(8, new Label(I18n.t("download.target_root")), rootCombo)
                 : new HBox(8, new Label(I18n.t("download.target_instance")), instanceCombo);
@@ -1093,14 +1294,230 @@ public final class DownloadPage extends HBox implements MclPage {
 
         VBox box = new VBox(10,
                 UiKit.title(I18n.t(category.displayKey())),
-                searchBar, filters, body, pager, bottomBar, status);
+                searchBar, filterBox, body, pager, bottomBar, status);
         String pending = pendingSearch;
         pendingSearch = null;
         if (pending != null && !pending.isBlank()) {
             query.setText(pending);
         }
-        Platform.runLater(() -> runSearch.accept(0));
+        Platform.runLater(() -> {
+            // 页面可能已经被下一次 showCategory 换掉（启动页跳搜索会连续重建两片）：
+            // 旧面板已从 content 移除就不再发请求，避免同一栏位短时间搜两遍
+            if (box.getParent() != null) {
+                runSearch.accept(0);
+            }
+        });
         return box;
+    }
+
+    // ---------- 搜索（Modrinth / CurseForge 分流） ----------
+
+    /** Modrinth 搜索：中文翻英文没命中时再用原文搜一次。 */
+    private void searchModrinth(Category category, SearchQuery query,
+                                Consumer<ModrinthClient.SearchResult> done) {
+        List<String> loaders = query.loader() == null ? List.of() : List.of(query.loader());
+        List<String> versions = query.mcVersion() == null ? List.of() : List.of(query.mcVersion());
+        CompletableFuture.supplyAsync(() -> context.modrinth().search(query.searchText(),
+                        category.projectType(), loaders, versions, query.environments(),
+                        query.sort(), query.offset()))
+                .thenAccept(result -> Platform.runLater(() -> {
+                    if (query.translated() && result.isSuccess() && result.totalHits() == 0
+                            && !query.text().equals(query.searchText())) {
+                        // 翻译没命中：用原文再搜一次
+                        CompletableFuture.supplyAsync(() -> context.modrinth().search(query.text(),
+                                        category.projectType(), loaders, versions,
+                                        query.environments(), query.sort(), query.offset()))
+                                .thenAccept(fallback -> Platform.runLater(() -> done.accept(fallback)));
+                        return;
+                    }
+                    done.accept(result);
+                }));
+    }
+
+    /** CurseForge 搜索：端点顺序按设置页「下载源」，返回结果由调用方在 FX 线程处理。 */
+    private void searchCurseForge(Category category, SearchQuery query,
+                                  Consumer<CurseForgeClient.SearchResult> done) {
+        boolean preferMirror = mirrorFirst();
+        CompletableFuture.supplyAsync(() -> CurseForgeClient.search(query.searchText(),
+                        category.projectType(), query.mcVersion(), query.loader(), query.offset(),
+                        preferMirror))
+                .thenAccept(result -> Platform.runLater(() -> {
+                    if (query.translated() && result.isSuccess() && result.totalHits() == 0
+                            && !query.text().equals(query.searchText())) {
+                        CompletableFuture.supplyAsync(() -> CurseForgeClient.search(query.text(),
+                                        category.projectType(), query.mcVersion(), query.loader(),
+                                        query.offset(), preferMirror))
+                                .thenAccept(fallback -> Platform.runLater(() -> done.accept(fallback)));
+                        return;
+                    }
+                    done.accept(result);
+                }));
+    }
+
+    /**
+     * 设置页「下载源」→ CurseForge 端点顺序（与 Modrinth 镜像一致）。
+     *
+     * <p>优先镜像 / 仅镜像 → 镜像先跑；优先官方 / 自定义 → 官方先跑。
+     * 两边都失败时客户端会自己回退另一个；没有 key 时官方会被直接跳过。
+     */
+    private boolean mirrorFirst() {
+        LauncherSettings settings = context.settings();
+        LauncherSettings.Source source = settings == null
+                ? LauncherSettings.Source.AUTO : settings.source();
+        return source != LauncherSettings.Source.OFFICIAL
+                && source != LauncherSettings.Source.CUSTOM;
+    }
+
+    /** CurseForgeClient 的错误讯息是中文；这里按内容换成当前语言的文案。 */
+    private static String curseForgeError(String message) {
+        if (message == null || message.isBlank()) {
+            return I18n.t("download.curseforge.error");
+        }
+        if (message.contains("API 为空")) {
+            return I18n.t("download.curseforge.no_key");
+        }
+        if (message.contains("频繁")) {
+            return I18n.t("download.curseforge.rate_limited");
+        }
+        java.util.regex.Matcher http = java.util.regex.Pattern
+                .compile("HTTP\\s*(\\d{3})").matcher(message);
+        if (http.find()) {
+            return I18n.t("download.curseforge.http_error", http.group(1));
+        }
+        return I18n.t("download.curseforge.error_detail", message);
+    }
+
+    /** 详情卡片第二行：作者（CurseForge 没有作者，改显示来源）+ 下载数。 */
+    private static String metaLine(SearchHit hit) {
+        ModrinthClient.Project project = hit.project();
+        String author = project.author() == null ? "" : project.author().trim();
+        String prefix;
+        if (!author.isEmpty()) {
+            prefix = author;
+        } else if (hit.source() == Source.CURSEFORGE) {
+            prefix = I18n.t("download.source.curseforge");
+        } else {
+            prefix = I18n.t("download.source.modrinth");
+        }
+        return prefix + " · " + project.downloads() + " downloads";
+    }
+
+    /**
+     * CurseForge 项目没有版本清单（只做了 {@code bestFile}）：
+     * 取「当前 MC 版本 + 加载器」下最新的可用文件，包成一个 VersionFile 填进同一棵版本树，
+     * 后面的下载 / 依赖 / 安装流程就完全复用。
+     */
+    private void showCurseForgeFile(SearchHit hit, String loaderValue, String mcVersion,
+                                    ComboBox<GameInstance> instanceCombo,
+                                    TreeView<Object> versions, Button install,
+                                    Label dependencyLabel, FlowPane detailTags,
+                                    java.util.function.BiConsumer<List<ModrinthClient.VersionFile>,
+                                            GameInstance> populate,
+                                    AtomicReference<SearchHit> selectedProject,
+                                    boolean importable) {
+        CompletableFuture.supplyAsync(() ->
+                        CurseForgeClient.bestFile(hit.curseForgeId(), mcVersion, loaderValue,
+                                mirrorFirst()))
+                .thenAccept(entry -> Platform.runLater(() -> {
+                    if (selectedProject.get() != hit) {
+                        // 玩家已经点了别的项目，丢弃这次结果
+                        return;
+                    }
+                    if (entry == null) {
+                        versions.setDisable(true);
+                        install.setDisable(true);
+                        dependencyLabel.setText(I18n.t("download.curseforge.no_file"));
+                        return;
+                    }
+                    if (entry.downloadUrl() == null || entry.downloadUrl().isBlank()) {
+                        // 作者关闭了第三方下载：CurseForge 只给网页下载按钮
+                        versions.setDisable(true);
+                        install.setDisable(true);
+                        dependencyLabel.setText(I18n.t("download.curseforge.no_download"));
+                        return;
+                    }
+                    ModrinthClient.VersionFile file = curseForgeVersionFile(entry, loaderValue, mcVersion);
+                    versions.setDisable(false);
+                    dependencyLabel.setText(I18n.t("download.detail.no_deps"));
+                    populate.accept(List.of(file), instanceCombo.getValue());
+                    // CurseForge 项目级没有「客户端 / 服务端」字段；文件级 gameVersions 里有，
+                    // 取到文件后在详情卡补一个环境标签（列表卡片不额外发请求去猜）
+                    String environment = environmentTag(entry.gameVersions());
+                    if (importable && !environment.isEmpty()) {
+                        detailTags.getChildren().add(tag(environment));
+                    }
+                    if (!importable) {
+                        // CurseForge 整合包是 manifest.json + overrides 的 zip，
+                        // 本启动器的整合包安装器只吃 Modrinth .mrpack → 不假装能装
+                        install.setDisable(true);
+                        dependencyLabel.setText(I18n.t("download.curseforge.modpack_unsupported"));
+                    }
+                }))
+                .exceptionally(error -> {
+                    Platform.runLater(() -> {
+                        if (selectedProject.get() == hit) {
+                            dependencyLabel.setText(
+                                    I18n.t("download.version_fetch_failed", rootMessage(error)));
+                        }
+                    });
+                    return null;
+                });
+    }
+
+    /** 把 CurseForge 的档案包装成 Modrinth 的 VersionFile（无哈希、无依赖）。 */
+    private static ModrinthClient.VersionFile curseForgeVersionFile(CurseForgeClient.FileEntry entry,
+                                                                    String loader, String mcVersion) {
+        return new ModrinthClient.VersionFile(
+                entry.fileId(), entry.fileName(), entry.fileName(), "",
+                entry.downloadUrl(), entry.fileName(), "", entry.size(),
+                mcVersionList(entry.gameVersions(), mcVersion),
+                loader == null || loader.isBlank() ? List.of() : List.of(loader),
+                List.of());
+    }
+
+    /** CurseForge 的 gameVersions 去掉 Client / Server / 加载器名，只留 MC 版本。 */
+    private static List<String> mcVersionList(List<String> gameVersions, String fallback) {
+        List<String> result = new ArrayList<>();
+        for (String value : gameVersions) {
+            if (value == null || value.isBlank()) {
+                continue;
+            }
+            String lower = value.toLowerCase(Locale.ROOT);
+            if (lower.equals("client") || lower.equals("server")
+                    || lower.equals("fabric") || lower.equals("forge")
+                    || lower.equals("neoforge") || lower.equals("quilt")
+                    || lower.equals("liteloader")) {
+                continue;
+            }
+            result.add(value);
+        }
+        if (result.isEmpty() && fallback != null && !fallback.isBlank()) {
+            result.add(fallback);
+        }
+        return result;
+    }
+
+    /** CurseForge 文件级的环境标签（Client / Server 在文件的 gameVersions 里）。 */
+    private static String environmentTag(List<String> gameVersions) {
+        boolean client = false;
+        boolean server = false;
+        for (String value : gameVersions) {
+            if (value == null) {
+                continue;
+            }
+            if ("client".equalsIgnoreCase(value)) {
+                client = true;
+            } else if ("server".equalsIgnoreCase(value)) {
+                server = true;
+            }
+        }
+        if (!client && !server) {
+            return "";
+        }
+        if (client && server) {
+            return I18n.t("download.env.tag.both");
+        }
+        return client ? I18n.t("download.env.tag.client") : I18n.t("download.env.tag.server");
     }
 
     /** 从启动页“下载皮肤补丁”跳到 Mod 搜索并自动搜 CustomSkinLoader。 */
@@ -1127,7 +1544,7 @@ public final class DownloadPage extends HBox implements MclPage {
     private record DependencyPlan(List<ModrinthClient.VersionFile> files, List<String> names) {
     }
 
-    private void installWithDependencies(ModrinthClient.Project project,
+    private void installWithDependencies(SearchHit hit,
                                          ModrinthClient.VersionFile file,
                                          GameInstance instance, String categoryKey,
                                          String loader, String mcVersion) {
@@ -1163,7 +1580,7 @@ public final class DownloadPage extends HBox implements MclPage {
                     if (context.uiState().dependenciesLatest()) {
                         List<ModrinthClient.VersionFile> picked = new ArrayList<>(plan.files());
                         picked.add(file);
-                        downloadFiles(picked, instance, categoryKey, project.title());
+                        downloadFiles(picked, instance, categoryKey, hit.project().title());
                         return;
                     }
                     int choice = askDependencyChoice(plan.files().size(), plan.names());
@@ -1172,7 +1589,7 @@ public final class DownloadPage extends HBox implements MclPage {
                         List<ModrinthClient.VersionFile> picked = new ArrayList<>();
                         picked.add(file);
                         chooseDependencyVersions(plan.files(), 0, picked, instance, categoryKey,
-                                project.title(), finalLoader, finalMc);
+                                hit.project().title(), finalLoader, finalMc);
                     } else if (choice == 2) {
                         downloadFiles(List.of(file), instance, categoryKey, file.displayName());
                     }
@@ -1356,6 +1773,29 @@ public final class DownloadPage extends HBox implements MclPage {
         return result;
     }
 
+
+    /**
+     * 候选下载地址。
+     *
+     * <p>CurseForge 的 forgecdn 直链会按设置页下载源给出「官方 CDN + MCIM 镜像」两条候选；
+     * 其它地址仍走原有 MirrorResolver（BMCLAPI 域名替换），映射不出就回退原始 URL。
+     */
+    private java.util.List<java.net.URI> sources(MclContext context, String url) {
+        java.util.List<java.net.URI> curseForge =
+                CurseForgeClient.downloadCandidates(url, mirrorFirst());
+        if (!curseForge.isEmpty()) {
+            return curseForge;
+        }
+        try {
+            java.util.List<java.net.URI> resolved = context.mirrors().resolve(url);
+            if (resolved != null && !resolved.isEmpty()) {
+                return resolved;
+            }
+        } catch (Exception ignored) {
+            // 映射失败就走原始地址
+        }
+        return java.util.List.of(java.net.URI.create(url));
+    }
     private void downloadFiles(List<ModrinthClient.VersionFile> files, GameInstance instance,
                                String categoryKey, String title) {
         String folder = switch (categoryKey) {
@@ -1372,7 +1812,7 @@ public final class DownloadPage extends HBox implements MclPage {
             for (ModrinthClient.VersionFile file : files) {
                 String name = Path.of(file.fileName()).getFileName().toString();
                 Path target = instance.gameDir().resolve(folder).resolve(name);
-                tasks.add(new DownloadTask(context.mirrors().resolve(file.downloadUrl()),
+                tasks.add(new DownloadTask(sources(context, file.downloadUrl()),
                         target, file.sha1(), file.size()));
             }
             context.downloader().downloadAll(tasks, snapshot ->
@@ -1471,24 +1911,27 @@ public final class DownloadPage extends HBox implements MclPage {
     private void fillSearchGameVersions(ComboBox<String> combo) {
         combo.getItems().add(I18n.t("download.all_versions"));
         combo.getSelectionModel().selectFirst();
-        Thread.ofVirtual().name("mcl-search-versions").start(() -> {
-            try {
-                List<MojangApi.VersionMeta> versions = context.mojang().versions(true);
-                List<String> ids = versions.stream()
-                        .filter(meta -> "release".equals(meta.type()))
-                        .map(MojangApi.VersionMeta::id)
-                        .distinct()
-                        .toList();
-                Platform.runLater(() -> {
-                    String selected = combo.getValue();
-                    combo.getItems().setAll(I18n.t("download.all_versions"));
-                    combo.getItems().addAll(ids);
-                    combo.setValue(selected == null ? I18n.t("download.all_versions") : selected);
-                });
-            } catch (Exception ignored) {
-                // 保留“全部版本”
-            }
-        });
+        if (manifestLoaded) {
+            addReleaseVersions(combo);
+            return;
+        }
+        // 清单还没回来：登记一下，等 loadManifest 的回呼一起填；
+        // 不要每个面板各自拉一次 version_manifest
+        pendingVersionCombos.add(combo);
+        loadManifest();
+    }
+
+    /** 用已缓存的清单填「游戏版本」下拉（只留 release，按清单顺序）。 */
+    private void addReleaseVersions(ComboBox<String> combo) {
+        List<String> ids = manifest.stream()
+                .filter(meta -> "release".equals(meta.type()))
+                .map(MojangApi.VersionMeta::id)
+                .distinct()
+                .toList();
+        String selected = combo.getValue();
+        combo.getItems().setAll(I18n.t("download.all_versions"));
+        combo.getItems().addAll(ids);
+        combo.setValue(selected == null ? I18n.t("download.all_versions") : selected);
     }
 
     private static ListCell<ModrinthClient.VersionFile> versionCell() {
@@ -1543,6 +1986,23 @@ public final class DownloadPage extends HBox implements MclPage {
         };
         return "https://www.curseforge.com/minecraft/search?class=" + category
                 + "&sortBy=relevancy&search=" + encodeQuery(project.title());
+    }
+
+    /** 来自 CurseForge 的结果直接开项目页（有 slug 时）；其余退回按名称搜索。 */
+    private static String curseforgeUrl(SearchHit hit, Category category) {
+        ModrinthClient.Project project = hit.project();
+        String slug = project.slug() == null ? "" : project.slug().trim();
+        if (hit.source() == Source.CURSEFORGE
+                && slug.matches("[A-Za-z0-9!@$()`.+,\"'\\-]{1,64}")) {
+            String path = switch (category.key()) {
+                case "modpack" -> "modpacks";
+                case "resourcepack" -> "texture-packs";
+                case "shader" -> "shaders";
+                default -> "mc-mods";
+            };
+            return "https://www.curseforge.com/minecraft/" + path + "/" + slug;
+        }
+        return curseforgeUrl(project);
     }
 
     /** MC 百科（中文站）搜尋。 */
@@ -1611,8 +2071,8 @@ public final class DownloadPage extends HBox implements MclPage {
             if (key.contains("fabric")) {
                 return "fabric";
             }
-            if (key.contains("")) {
-                return "";
+            if (key.contains("quilt")) {
+                return "quilt";
             }
             if (key.contains("neoforge")) {
                 return "neoforge";
@@ -1643,7 +2103,7 @@ public final class DownloadPage extends HBox implements MclPage {
         }
         return switch (instance.loader().type()) {
             case FABRIC -> "fabric";
-            case QUILT -> "";
+            case QUILT -> "quilt";
             case FORGE, OPTIFINE -> "forge";
             case NEOFORGE -> "neoforge";
             case VANILLA -> "vanilla";
@@ -1653,7 +2113,7 @@ public final class DownloadPage extends HBox implements MclPage {
     private static String loaderLabel(String key) {
         return switch (key) {
             case "fabric" -> "Fabric";
-            case "" -> "";
+            case "quilt" -> "Quilt";
             case "forge" -> "Forge";
             case "neoforge" -> "NeoForge";
             case "liteloader" -> "LiteLoader";
@@ -1666,9 +2126,9 @@ public final class DownloadPage extends HBox implements MclPage {
         };
     }
 
-    /** 加载器分组固定顺序（原版/数据包 → Fabric →  → Forge → NeoForge → 其它）。 */
+    /** 加载器分组固定顺序（原版/数据包 → Fabric → Quilt → Forge → NeoForge → 其它）。 */
     private static int compareLoaderGroup(String left, String right) {
-        List<String> order = List.of("vanilla", "datapack", "fabric", "", "forge",
+        List<String> order = List.of("vanilla", "datapack", "fabric", "quilt", "forge",
                 "neoforge", "liteloader", "rift", "server", "other");
         int a = order.indexOf(left);
         int b = order.indexOf(right);
@@ -1708,6 +2168,16 @@ public final class DownloadPage extends HBox implements MclPage {
         }
         return current.getMessage() == null
                 ? current.getClass().getSimpleName() : current.getMessage();
+    }
+
+    private static List<Label> tagsFor(SearchHit hit) {
+        if (hit.source() == Source.CURSEFORGE) {
+            // CurseForge 搜索结果不带头部环境 / 分类 / 游戏版本字段，只标来源
+            List<Label> tags = new ArrayList<>();
+            tags.add(tag(I18n.t("download.source.curseforge")));
+            return tags;
+        }
+        return tagsFor(hit.project());
     }
 
     private static List<Label> tagsFor(ModrinthClient.Project project) {
@@ -1756,15 +2226,16 @@ public final class DownloadPage extends HBox implements MclPage {
         return "";
     }
 
-    private final class ProjectCell extends ListCell<ModrinthClient.Project> {
+    private final class ProjectCell extends ListCell<SearchHit> {
         @Override
-        protected void updateItem(ModrinthClient.Project project, boolean empty) {
-            super.updateItem(project, empty);
-            if (empty || project == null) {
+        protected void updateItem(SearchHit hit, boolean empty) {
+            super.updateItem(hit, empty);
+            if (empty || hit == null) {
                 setText(null);
                 setGraphic(null);
                 return;
             }
+            ModrinthClient.Project project = hit.project();
             StackPane coverBox = new StackPane();
             coverBox.setMinSize(48, 48);
             coverBox.setPrefSize(48, 48);
@@ -1789,7 +2260,7 @@ public final class DownloadPage extends HBox implements MclPage {
                     RemoteImages.load(url, 44, 44, image -> {
                         iconCache.put(key, image);
                         // 列表复用 cell：只有仍显示同一个项目时才替换，避免串图
-                        if (getItem() == project) {
+                        if (getItem() == hit) {
                             cover.setImage(image);
                             coverBox.getChildren().setAll(cover);
                         }
@@ -1797,9 +2268,19 @@ public final class DownloadPage extends HBox implements MclPage {
                 }
             }
 
-            Label title = new Label(project.title());
+            // 标题前面带上对照表里的中文名（HMCL 的中英对照表），玩家一眼能认出是哪个 Mod
+            String chineseName = com.brisklauncher.mcl.download.remote.LocalizedNames.chineseFor(
+                    project.slug() == null ? project.title() : project.slug());
+            if (chineseName == null || chineseName.isBlank()) {
+                chineseName = com.brisklauncher.mcl.download.remote.LocalizedNames.chineseFor(project.title());
+            }
+            String titleText = chineseName == null || chineseName.isBlank()
+                    || chineseName.equalsIgnoreCase(project.title())
+                    ? project.title()
+                    : chineseName + "  " + project.title();
+            Label title = new Label(titleText);
             title.setStyle("-fx-font-weight: bold;");
-            Label meta = new Label(project.author() + " · " + project.downloads() + " downloads");
+            Label meta = new Label(metaLine(hit));
             meta.getStyleClass().add("cat-hint");
             Label description = new Label(project.description());
             description.getStyleClass().add("instance-meta");
@@ -1807,7 +2288,7 @@ public final class DownloadPage extends HBox implements MclPage {
             description.setTextOverrun(javafx.scene.control.OverrunStyle.ELLIPSIS);
             FlowPane tags = new FlowPane(4, 4);
             tags.setPrefWrapLength(430);
-            tags.getChildren().setAll(tagsFor(project));
+            tags.getChildren().setAll(tagsFor(hit));
             VBox text = new VBox(2, title, meta, description, tags);
             HBox.setHgrow(text, Priority.ALWAYS);
             HBox row = new HBox(10, coverBox, text);
@@ -1998,8 +2479,7 @@ public final class DownloadPage extends HBox implements MclPage {
                         I18n.t("download.saved", path.getFileName().toString())));
     }
 
-    private void importModpackProject(ModrinthClient.Project project, GameDirectory root,
-                                      String loader, String mcVersion) {
+    private void importModpackProject(SearchHit hit, GameDirectory root, String mcVersion) {
         if (root == null) {
             MCLDialog.info(getScene().getWindow(), I18n.t("download.target_root"),
                     I18n.t("version.empty_roots"));
@@ -2010,27 +2490,38 @@ public final class DownloadPage extends HBox implements MclPage {
         }
         // 主题化输入框（系统外观的 TextInputDialog 和启动器风格不统一）
         MCLDialog.prompt(getScene().getWindow(), I18n.t("download.download_import"),
-                I18n.t("download.instance_name"), project.title(),
-                name -> startModpackInstall(project, root, name, mcVersion));
+                I18n.t("download.instance_name"), hit.project().title(),
+                name -> startModpackInstall(hit, root, name, mcVersion));
     }
 
-    private void startModpackInstall(ModrinthClient.Project project, GameDirectory root,
+    /** 旧的 Modrinth-only 入口（{@code buildSearchPaneOld} 还在呼叫）。 */
+    private void importModpackProject(ModrinthClient.Project project, GameDirectory root,
+                                      String loader, String mcVersion) {
+        importModpackProject(SearchHit.modrinth(project), root, mcVersion);
+    }
+
+    private void startModpackInstall(SearchHit hit, GameDirectory root,
                                      String instanceName, String mcVersion) {
         TaskDialog.run(getScene().getWindow(), I18n.t("download.download_import"), progress -> {
-            ModrinthClient.VersionFile file = context.modrinth()
-                    .bestFile(project.id(), null, mcVersion);
+            ModrinthClient.VersionFile file = hit.source() == Source.CURSEFORGE
+                    ? curseForgeModpackFile(hit, mcVersion)
+                    : context.modrinth().bestFile(hit.project().id(), null, mcVersion);
             Path archive = com.brisklauncher.mcl.AppPaths.cacheDir()
                     .resolve("modpacks").resolve(
                             com.brisklauncher.mcl.security.PathSafety.safeFileName(file.fileName()));
             progress.accept(new InstallProgress(InstallProgress.Stage.ASSETS, 0.05,
                     file.fileName()));
             DownloadTask task = new DownloadTask(
-                    context.mirrors().resolve(file.downloadUrl()), archive, file.sha1(), file.size());
+                    sources(context, file.downloadUrl()), archive, file.sha1(), file.size());
             context.downloader().downloadAll(List.of(task), snapshot ->
                     progress.accept(new InstallProgress(InstallProgress.Stage.ASSETS,
                             0.05 + snapshot.ratio() * 0.35,
                             snapshot.completed() + "/" + snapshot.total())));
 
+            // 防御：CurseForge 的整合包是 manifest.json + overrides 的 zip，本启动器只吃 .mrpack
+            if (com.brisklauncher.mcl.modpack.MrpackReader.looksLikeCurseForgeZip(archive)) {
+                throw new IllegalStateException(I18n.t("download.curseforge.modpack_unsupported"));
+            }
             ModpackIndex index = context.modpackInstaller().peek(archive);
             progress.accept(new InstallProgress(InstallProgress.Stage.RESOLVING, 0.4,
                     index.displayName()));
@@ -2040,6 +2531,16 @@ public final class DownloadPage extends HBox implements MclPage {
                     I18n.t("download.installed", entry.id()));
             installFinished(entry);
         });
+    }
+
+    /** CurseForge 整合包：取当前 MC 版本下最新、可直连下载的档案。 */
+    private ModrinthClient.VersionFile curseForgeModpackFile(SearchHit hit, String mcVersion) {
+        CurseForgeClient.FileEntry entry = CurseForgeClient.bestFile(hit.curseForgeId(),
+                mcVersion, null, mirrorFirst());
+        if (entry == null || entry.downloadUrl() == null || entry.downloadUrl().isBlank()) {
+            throw new IllegalStateException(I18n.t("download.curseforge.no_file"));
+        }
+        return curseForgeVersionFile(entry, null, mcVersion);
     }
 
     // ---------- 公共 ----------

@@ -19,7 +19,7 @@ plugins {
 }
 
 group = 'com.brisklauncher'
-version = '1.1.2'
+version = '1.1.3'
 
 java {
     toolchain {
@@ -342,18 +342,30 @@ tasks.register("releaseZip", Zip) {
 //  只读文件与 -P 参数，刻意「不读环境变量」：
 //  环境变量会被启动游戏的子进程继承，等于把 ID 送到每个 mod 手里。
 // ============================================================
-def clientIdFile = file('config/client-id.properties')
+// 统一密钥文件：config/secrets.properties（不入库）
+// 里面的 microsoft.client.id 与 curseforge.api.key 会一起注入 jar 内的 assets/brisk-build.properties。
+// 旧名 config/client-id.properties 仍然兼容（只放 microsoft.client.id）。
+def secretsFile = file('config/secrets.properties')
+def clientIdFile = secretsFile.isFile() ? secretsFile : file('config/client-id.properties')
+
+def readSecret = { String key ->
+    if (!clientIdFile.isFile()) {
+        return ''
+    }
+    def props = new Properties()
+    clientIdFile.withInputStream { props.load(it) }
+    (props.getProperty(key) ?: '').trim()
+}
 
 def clientIdValue = providers.provider {
-    String fromFile = ''
-    if (clientIdFile.isFile()) {
-        def props = new Properties()
-        clientIdFile.withInputStream { props.load(it) }
-        fromFile = (props.getProperty('microsoft.client.id') ?: '').trim()
-    }
     // -Pbrisk.ms.client.id=... 只用于临时本地测试，优先于文件
     String override = (project.findProperty('brisk.ms.client.id') ?: '').trim()
-    override ?: fromFile
+    override ?: readSecret('microsoft.client.id')
+}
+
+def curseforgeKeyValue = providers.provider {
+    String override = (project.findProperty('brisk.curseforge.key') ?: '').trim()
+    override ?: readSecret('curseforge.api.key')
 }
 
 def generateBuildInfo = tasks.register('generateBuildInfo') {
@@ -362,6 +374,7 @@ def generateBuildInfo = tasks.register('generateBuildInfo') {
     def outDir = layout.buildDirectory.dir('generated/buildinfo/assets')
     def outFile = outDir.map { it.file('brisk-build.properties') }
     inputs.property('microsoft.client.id', clientIdValue)
+    inputs.property('curseforge.api.key', curseforgeKeyValue)
     outputs.file(outFile)
     doLast {
         def f = outFile.get().asFile
@@ -372,9 +385,12 @@ def generateBuildInfo = tasks.register('generateBuildInfo') {
             w.write("microsoft.client.id=${v}\n")
             w.write("build.version=${project.version}\n")
             w.write("build.flavor=${v ? 'official' : 'oss'}\n")
+            w.write("curseforge.api.key=${curseforgeKeyValue.get()}\n")
         }
         logger.lifecycle(v ? 'build-info: 已注入客户端 ID（官方构建）'
                 : 'build-info: 未配置客户端 ID（OSS 构建，登录时会提示未配置）')
+        logger.lifecycle(curseforgeKeyValue.get() ? 'build-info: 已注入 CurseForge API key'
+                : 'build-info: 未配置 CurseForge API key（CurseForge 源会走镜像）')
     }
 }
 
