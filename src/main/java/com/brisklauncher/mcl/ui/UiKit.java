@@ -126,6 +126,25 @@ public final class UiKit {
     }
 
     /**
+     * 关掉助记符解析（{@code Button} / {@code MenuButton} / {@code ToggleButton} /
+     * {@code CheckBox} / {@code RadioButton} 默认是 {@code mnemonicParsing=true}）。
+     *
+     * <p>这些控件会把文字里的 {@code _} 当成助记符吃掉：玩家名 {@code Xiaojiu_114514}
+     * 会显示成 {@code Xiaojiu114514}（第 190 轮实测，JavaFX 21）。
+     * 凡是「文字来自玩家/文件」的控件都要套一层。
+     */
+    public static <T extends javafx.scene.control.Labeled> T noMnemonic(T control) {
+        control.setMnemonicParsing(false);
+        return control;
+    }
+
+    /** {@code MenuItem} 不是 {@code Labeled}，但它同样默认 {@code mnemonicParsing=true}。 */
+    public static <T extends javafx.scene.control.MenuItem> T noMnemonic(T item) {
+        item.setMnemonicParsing(false);
+        return item;
+    }
+
+    /**
      * 让弹窗可以按住某个区域自由拖动（标题列/空白处都行）。
      *
      * <p>弹窗是无边框 Stage，只能靠这个移动；带滑鼠的按下位移差计算，

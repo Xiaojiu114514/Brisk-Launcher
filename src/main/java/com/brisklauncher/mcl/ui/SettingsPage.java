@@ -476,6 +476,8 @@ public final class SettingsPage extends VBox implements MclPage {
                         + com.brisklauncher.mcl.update.UpdateService.CURRENT_VERSION),
                 new Label("Java 21 · JavaFX · JPMS"),
                 repoRow, dataLabel, openData, memoryRow,
+                // 关于页的读数只是「启动器自身」，玩家常拿它和游戏进程比（第 189 轮）。
+                UiKit.catHint(I18n.t("settings.about.memory_hint")),
                 UiKit.catHint(I18n.t("settings.security")),
                 UiKit.title(I18n.t("settings.third_party_section")), disclaimer, credits));
     }

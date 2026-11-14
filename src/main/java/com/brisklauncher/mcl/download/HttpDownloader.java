@@ -220,7 +220,7 @@ public final class HttpDownloader implements AutoCloseable {
     private void fetch(URI uri, Path temp, AtomicLong bytesDone, Runnable onByteProgress) throws IOException {
         try {
             HttpRequest request = HttpRequest.newBuilder(uri)
-                    .header("User-Agent", "BriskLauncher/1.1.3")
+                    .header("User-Agent", "BriskLauncher/1.1.4")
                     .header("Accept", "*/*")
                     .timeout(Duration.ofMinutes(3))
                     .GET()

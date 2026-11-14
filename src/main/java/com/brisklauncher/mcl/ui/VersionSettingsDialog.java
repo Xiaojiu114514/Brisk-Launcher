@@ -275,7 +275,11 @@ public final class VersionSettingsDialog {
       javaGrid.setHgap((double)12.0F);
       javaGrid.setVgap((double)12.0F);
       javaGrid.setPadding(new Insets((double)16.0F));
-      javaGrid.addRow(0, new Node[]{new Label(I18n.t("version.settings.memory")), memory});
+      // -Xmx 只管 Java 堆：不写清楚，玩家会以为「启动器给 4G、进程占 13G」是启动器的 bug（第 189 轮）。
+      Label memoryHint = UiKit.catHint(I18n.t("version.settings.memory_hint"));
+      memoryHint.setWrapText(true);
+      javaGrid.addRow(0, new Node[]{new Label(I18n.t("version.settings.memory")),
+              new VBox((double)4.0F, new Node[]{memory, memoryHint})});
       javaGrid.addRow(1, new Node[]{new Label(I18n.t("version.settings.java_path")), new HBox((double)6.0F, new Node[]{javaPath, browseJava})});
       javaGrid.addRow(2, new Node[]{new Label(I18n.t("version.settings.java_detect")), jdkCombo});
       javaGrid.addRow(3, new Node[]{new Label(""), downloadJava});

@@ -144,6 +144,8 @@ public final class TopBar extends HBox {
         runningButton.setManaged(false);
 
         accountMenu = new MenuButton();
+        // MenuButton 默认会解析助记符：账号名里的 _ 会被吞掉（第 190 轮）
+        UiKit.noMnemonic(accountMenu);
         accountMenu.getStyleClass().add("account-switch-btn");
         accountMenu.setOnShowing(e -> refreshAccountMenu());
         refreshAccountMenu();
@@ -237,7 +239,7 @@ public final class TopBar extends HBox {
         if (all.isEmpty()) {
             MenuItem empty = new MenuItem(I18n.t("account.no_current"));
             empty.setDisable(true);
-            accountMenu.getItems().add(empty);
+            accountMenu.getItems().add(UiKit.noMnemonic(empty));
         } else {
             for (com.brisklauncher.mcl.auth.api.AccountType type : com.brisklauncher.mcl.auth.api.AccountType.values()) {
                 List<AccountStore.Account> group = all.stream()
@@ -247,6 +249,7 @@ public final class TopBar extends HBox {
                 }
                 MenuItem header = new MenuItem(I18n.t("account.tab." + type.name().toLowerCase(java.util.Locale.ROOT)));
                 header.setDisable(true);
+                UiKit.noMnemonic(header);
                 if (!accountMenu.getItems().isEmpty()) {
                     accountMenu.getItems().add(new SeparatorMenuItem());
                 }
@@ -254,6 +257,7 @@ public final class TopBar extends HBox {
                 for (AccountStore.Account account : group) {
                     String prefix = account.uuid().equals(currentUuid) ? "✔ " : "    ";
                     MenuItem item = new MenuItem(prefix + account.name());
+                    UiKit.noMnemonic(item);
                     item.setOnAction(e -> {
                         context.accounts().setCurrent(account.uuid());
                         refreshAccountMenu();
@@ -265,6 +269,7 @@ public final class TopBar extends HBox {
 
         accountMenu.getItems().add(new SeparatorMenuItem());
         MenuItem manage = new MenuItem(I18n.t("account.manage"));
+        UiKit.noMnemonic(manage);
         manage.setOnAction(e -> onNavigate.accept("account"));
         accountMenu.getItems().add(manage);
     }

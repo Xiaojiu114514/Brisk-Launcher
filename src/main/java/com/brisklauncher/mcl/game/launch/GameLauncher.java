@@ -77,7 +77,9 @@ public final class GameLauncher {
     private static final Pattern PLACEHOLDER = Pattern.compile("\\$\\{[^}]+}");
     private static final DateTimeFormatter LOG_TIME = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
     private static final String LAUNCHER_NAME = "BriskLauncher";
-    private static final String LAUNCHER_VERSION = "1.1.3";
+    private static final String LAUNCHER_VERSION = "1.1.4";
+    /** 数 mods 时的上限（只用来分档，不需要精确值）。 */
+    private static final int MOD_COUNT_CAP = 255;
 
     private final Supplier<LauncherSettings> settingsSupplier;
     private final VersionInstaller installer;
@@ -148,7 +150,12 @@ public final class GameLauncher {
         ObjectNode merged = new GameVersionMerger(entry.root().path()).merge(entry);
 
         progress.accept(LaunchProgress.CHECKING_FILES);
-        if (!installer.looksComplete(entry)) {
+        List<String> missing = installer.missingFiles(entry);
+        if (!missing.isEmpty()) {
+            // 这份清单只用来「尽力补全」：缺库的实例补完就能跑；补不回来的交给游戏自己报错
+            // （早退检测会带出退出码与日志尾部），不再当成能不能启动的闸门（第 189 轮）。
+            SafeLog.info("启动前缺少 " + missing.size() + " 个文件（最多列 12 个），尝试补全："
+                    + String.join(", ", missing));
             progress.accept(LaunchProgress.INSTALLING);
             final Consumer<LaunchProgress> installProgress = progress;
             try {
@@ -157,7 +164,9 @@ public final class GameLauncher {
                 if (handle.isCancelled() || isCancellation(e)) {
                     throw new LaunchCancelledException();
                 }
-                throw new LaunchException("补全游戏文件失败：" + safeMessage(e), e);
+                // 不在这里拒绝启动：libraries 与清单版本对不上是常见现象（PCL/官方安装器装的实例），
+                // 补不上不一定起不来；真的起不来时下面的早退检测给出的信息更准确。
+                SafeLog.warn("自动补全失败，继续尝试启动：" + safeMessage(e));
             }
         }
 
@@ -200,8 +209,11 @@ public final class GameLauncher {
         command.add(jdk.javaExecutable().toString());
 
         List<String> jvmArgs = collectJvmArgs(merged, variables, settings);
-        // PCL 风格的记忆体优化（可于设定页关闭）：只加安全旗标，不动堆大小
-        com.brisklauncher.mcl.util.MemoryTuning.apply(jvmArgs, settings.memoryMb());
+        // 记忆体优化（可于设定页关闭）：只加 GC/诊断旗标，不动堆大小。
+        // 参数对齐 PCL2 与 HMCL 的默认值；mods 数量只决定要不要多套整合包那两条（第 189 轮）。
+        int modCount = countMods(gameDir);
+        List<String> tuningFlags = com.brisklauncher.mcl.util.MemoryTuning.apply(
+                jvmArgs, settings.memoryMb(), modCount);
         command.addAll(jvmArgs);
 
         if (session.isThirdParty()) {
@@ -213,6 +225,32 @@ public final class GameLauncher {
         command.add("-Xmx" + settings.memoryMb() + "M");
         command.add("-Dminecraft.launcher.brand=" + LAUNCHER_NAME);
         command.add("-Dminecraft.launcher.version=" + LAUNCHER_VERSION);
+        // 子进程 stdout 是**管道**，zh-CN Windows 上 JVM 默认按 native.encoding（GBK）写，
+        // 而 pumpOutput / readTail 一律按 UTF-8 解码 → 模组的中文日志会整段乱码（第 189 轮实测）。
+        // 两个属性名分别覆盖 JDK 8（sun.stdout.encoding）与 19+（stdout.encoding）。
+        command.add("-Dstdout.encoding=UTF-8");
+        command.add("-Dsun.stdout.encoding=UTF-8");
+        command.add("-Dstderr.encoding=UTF-8");
+        command.add("-Dsun.stderr.encoding=UTF-8");
+        // Forge / NeoForge 的 jar 完整性自检：改过 jar（汉化、替换贴图、整合包重打包）常被判
+        // 「已被修改」而拒绝启动。PCL 与 HMCL 都把这两条当默认值，其它加载器用不到 → 只给 Forge 系。
+        if (isForgeFamily(entry)) {
+            command.add("-Dfml.ignoreInvalidMinecraftCertificates=true");
+            command.add("-Dfml.ignorePatchDiscrepancies=true");
+        }
+        // 开发期 GC 日志（-Dmcl.dev.gclog=1）：排查「进程内存 / 停顿」时最直接的证据。
+        // -Xlog 是 JDK 9+ 的选项，Java 8 的实例要跳过（否则游戏直接起不来）。
+        // 用相对路径（相对 gameDir）：-Xlog 的 file= 用冒号分段，塞进盘符会被解析错。
+        if (System.getProperty("mcl.dev.gclog") != null && jdk.majorVersion() >= 9) {
+            try {
+                Files.createDirectories(gameDir.resolve("logs"));
+                command.add("-Xlog:gc*:file=logs/gc-" + safeFileToken(entry.id()) + "-"
+                        + LocalDateTime.now().format(LOG_TIME)
+                        + ".log:time,uptime:filecount=3,filesize=2M");
+            } catch (IOException e) {
+                SafeLog.warn("创建 GC 日志目录失败，已跳过 -Xlog");
+            }
+        }
         if (!containsPrefix(jvmArgs, "-Djava.library.path=")) {
             command.add("-Djava.library.path=" + nativesDir);
         }
@@ -287,7 +325,7 @@ public final class GameLauncher {
                 "PID " + process.pid() + " · 会话日志 " + sessionLog.getFileName());
 
         TailBuffer tail = new TailBuffer(160);
-        writeSessionHeader(sessionLog, entry, jdk, settings.memoryMb());
+        writeSessionHeader(sessionLog, entry, jdk, settings.memoryMb(), tuningFlags);
         pumpOutput(process, sessionLog, tail);
         runningGames.register(entry.id(), process);
 
@@ -858,13 +896,18 @@ public final class GameLauncher {
     }
 
     /** 会话日志头部：只写启动器与 Java 信息，不含令牌。 */
-    private void writeSessionHeader(Path logFile, GameInstance entry, JdkInfo jdk, int memoryMb) {
+    private void writeSessionHeader(Path logFile, GameInstance entry, JdkInfo jdk, int memoryMb,
+                                    List<String> tuningFlags) {
         String header = "[MCL] " + LAUNCHER_NAME + " " + LAUNCHER_VERSION
                 + " | version=" + entry.id()
                 + " | loader=" + entry.loaderDisplay()
                 + " | java=" + jdk.majorVersion()
                 + " | memory=" + memoryMb + "M"
                 + " | os=" + System.getProperty("os.name")
+                + System.lineSeparator()
+                // 第二行记下本次真正追加的 GC 旗标：下次查「内存/卡顿」不用再猜启动参数。
+                + "[MCL] jvm = -Xmx" + memoryMb + "M "
+                + (tuningFlags.isEmpty() ? "(未套用优化旗标)" : String.join(" ", tuningFlags))
                 + System.lineSeparator();
         try {
             Files.createDirectories(logFile.getParent());
@@ -921,6 +964,46 @@ public final class GameLauncher {
             return null;
         }
         return assetsDir.resolve("log_configs").resolve(id);
+    }
+
+    /**
+     * 数 {@code mods/} 里的 jar，用来决定套哪一档 GC 旗标。
+     *
+     * <p>只数到 {@link #MOD_COUNT_CAP} 就停：几千个文件的整合包不应该为了「数数」拖慢启动。
+     */
+    private static int countMods(Path gameDir) {
+        Path mods = gameDir.resolve("mods");
+        if (!Files.isDirectory(mods)) {
+            return 0;
+        }
+        try (var stream = Files.list(mods)) {
+            return (int) Math.min(MOD_COUNT_CAP, stream
+                    .filter(Files::isRegularFile)
+                    .filter(file -> file.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".jar"))
+                    .limit(MOD_COUNT_CAP)
+                    .count());
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    /** 把版本名压成安全的文件名片段（{@code -Xlog:...file=} 不能被冒号/空白破坏）。 */
+    private static String safeFileToken(String text) {
+        if (text == null || text.isBlank()) {
+            return "game";
+        }
+        String token = text.replaceAll("[^A-Za-z0-9._-]", "_");
+        return token.length() > 48 ? token.substring(0, 48) : token;
+    }
+
+    /** Forge / NeoForge（FML）才需要 {@code -Dfml.*} 那两条完整性旗标。 */
+    private static boolean isForgeFamily(GameInstance entry) {
+        if (entry.loader() == null) {
+            return false;
+        }
+        com.brisklauncher.mcl.game.LoaderInfo.LoaderType type = entry.loader().type();
+        return type == com.brisklauncher.mcl.game.LoaderInfo.LoaderType.FORGE
+                || type == com.brisklauncher.mcl.game.LoaderInfo.LoaderType.NEOFORGE;
     }
 
     private static String dashedless(String uuid) {

@@ -51,7 +51,8 @@ public final class AccountPage extends VBox implements MclPage {
     private final OfflineAuthProvider offline = new OfflineAuthProvider();
 
     private final StackPane content = new StackPane();
-    private final Label currentLabel = new Label();
+    // 账号名可能带下划线（xiaojiu_114514）：Label 默认不解析助记符，显式关掉以防基类换成 Button（第 190 轮）
+    private final Label currentLabel = UiKit.noMnemonic(new Label());
     private Runnable currentPaneBuilder;
     private Runnable accountUnsubscribe;
 
@@ -502,6 +503,12 @@ public final class AccountPage extends VBox implements MclPage {
     private ListView<AccountStore.Account> accountList(AccountType type) {
         ListView<AccountStore.Account> list = new ListView<>();
         list.setCellFactory(view -> new ListCell<>() {
+            {
+                // 账号名可能带下划线（xiaojiu_114514 / _Hatsune__Miku_）。ListCell 默认不解析助记符，
+                // 这里显式关掉，避免哪天换成 Button 类的基类又把 _ 吞掉（第 190 轮）。
+                setMnemonicParsing(false);
+            }
+
             @Override
             protected void updateItem(AccountStore.Account item, boolean empty) {
                 super.updateItem(item, empty);

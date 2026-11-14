@@ -337,7 +337,7 @@ public final class CurseForgeClient {
             }
             HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(requestUrl))
                     .header("Accept", "application/json")
-                    .header("User-Agent", "BriskLauncher/1.1.3 (CurseForge)")
+                    .header("User-Agent", "BriskLauncher/1.1.4 (CurseForge)")
                     .timeout(TIMEOUT)
                     .GET();
             if (endpoint.official()) {
@@ -453,7 +453,7 @@ public final class CurseForgeClient {
             }
             HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(requestUrl))
                     .header("Accept", "application/json")
-                    .header("User-Agent", "BriskLauncher/1.1.3 (CurseForge)")
+                    .header("User-Agent", "BriskLauncher/1.1.4 (CurseForge)")
                     .timeout(TIMEOUT)
                     .GET();
             if (endpoint.official()) {

@@ -137,16 +137,19 @@ public final class VersionInstaller {
         progress.accept(new InstallProgress(InstallProgress.Stage.FINISHING, 0.99, entry.id()));
     }
 
-    /** 快速判断文件是否齐全（只看存在性，不做哈希，用于 UI 状态展示）。 */
+    /**
+     * 快速判断「缺了必定起不来」的必需文件是否齐全（只看存在性，不做哈希，用于 UI 状态展示）。
+     *
+     * <p>**刻意不查 libraries**：PCL / 官方安装器装的实例经常出现「版本 JSON 里的库版本
+     * 与 libraries 目录里的实际版本对不上」（第 14 / 75 轮：把库缺失算成「需要补全」→
+     * 能正常启动的实例永远显示 ⚠）。要补全的完整清单见 {@link #missingFiles}。
+     */
     public boolean looksComplete(GameInstance entry) {
-        return missingFiles(entry).isEmpty();
+        return missingEssentials(entry).isEmpty();
     }
 
-    /**
-     * 列出缺失文件的相对路径（最多 12 条，便于诊断与 UI 提示）。
-     * 只检查“必须存在”的文件：继承链上的 client jar、libraries、资源索引。
-     */
-    public List<String> missingFiles(GameInstance entry) {
+    /** 必需文件：继承链上的 client jar（清单是空壳时也算缺）。 */
+    public List<String> missingEssentials(GameInstance entry) {
         List<String> missing = new ArrayList<>();
         try {
             ObjectNode merged = new GameVersionMerger(entry.root().path()).merge(entry);
@@ -167,22 +170,47 @@ public final class VersionInstaller {
                     && !Files.isRegularFile(entry.root().assetsDir().resolve("indexes").resolve(indexId + ".json"))) {
                 missing.add("assets/indexes/" + indexId + ".json");
             }
+            // log4j 配置不算「必须存在」：官方启动器/PCL 装的版本目录里通常没有
+            // assets/log_configs，缺了游戏照样跑（GameLauncher 会自动跳过）。
+            // 这里要是算进缺失列表，别人的实例会永远显示「需要补全」。
+        } catch (Exception e) {
+            missing.add("版本 JSON 无法解析");
+        }
+        return missing;
+    }
+
+    /**
+     * 启动前要补全的文件：必需文件 + 真的有下载地址的 libraries（最多列 12 条）。
+     *
+     * <p>这份清单只用来「尽力补全」与日志诊断，**不再当作能不能启动的闸门**：
+     * 缺库的实例补完就能跑，补不回来的由游戏自己报错（早退检测会带出退出码与日志尾部），
+     * 这样既能自愈，又不会把本来能启动的实例挡在门外（第 118 轮的教训）。
+     */
+    public List<String> missingFiles(GameInstance entry) {
+        List<String> essential = missingEssentials(entry);
+        if (!essential.isEmpty()) {
+            return essential;
+        }
+        List<String> missing = new ArrayList<>();
+        try {
+            ObjectNode merged = new GameVersionMerger(entry.root().path()).merge(entry);
             for (JsonNode library : merged.path("libraries")) {
-                if (true || !Rules.allows(library, Rules.Features.none()) || Libraries.isNativesOnly(library)) {
+                if (!Rules.allows(library, Rules.Features.none()) || Libraries.isNativesOnly(library)) {
                     continue;
                 }
-                // 真实路径优先用 downloads.artifact.path：1.19+ 的 natives 条目名字里
-                // 带 classifier，按 name 推导会算错路径 → 明明能启动却报“需要补全”。
-                String relative = library.path("downloads").path("artifact").path("path").asText("");
-                if (relative.isBlank()) {
-                    relative = Libraries.pathOf(library);
+                // 只报「有下载地址」的构件。理由（第 189 轮）：
+                // - 加载器（Forge/NeoForge）自己生成的库常常没有 downloads 字段，路径只能按名字硬推，
+                //   推错就会「明明能启动却永远报缺」；
+                // - 没有 URL 也无从修复，报出来只会让日志噪声变大。
+                // 所以：有 URL ⇒ 真的缺 ⇒ 一定补得回来；没 URL ⇒ 不参与判定。
+                String artifactUrl = library.path("downloads").path("artifact").path("url").asText("");
+                if (artifactUrl.isBlank()) {
+                    continue;
                 }
+                // 路径统一走 Libraries.pathOf（优先 downloads.artifact.path，没有才按 name 推导），
+                // 与 libraryTasks() / buildClasspath() 保持同一套规则。
+                String relative = Libraries.pathOf(library);
                 if (relative == null || relative.isBlank()) {
-                    continue;
-                }
-                if (library.path("downloads").path("artifact").path("url").asText("").isBlank()
-                        && library.path("downloads").path("classifiers").isObject()) {
-                    // 老版本的 natives（靠 classifiers 下载），换机器可重建，不算缺失
                     continue;
                 }
                 if (!Files.isRegularFile(com.brisklauncher.mcl.security.PathSafety.resolveUnder(entry.root().librariesDir(), relative))) {
@@ -192,9 +220,6 @@ public final class VersionInstaller {
                     }
                 }
             }
-            // log4j 配置不算「必须存在」：官方启动器/PCL 装的版本目录里通常没有
-            // assets/log_configs，缺了游戏照样跑（GameLauncher 会自动跳过）。
-            // 这里要是算进缺失列表，别人的实例会永远显示「需要补全」。
         } catch (Exception e) {
             missing.add("版本 JSON 无法解析");
         }

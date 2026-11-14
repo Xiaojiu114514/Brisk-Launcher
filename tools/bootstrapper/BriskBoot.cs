@@ -21,6 +21,7 @@ using System.IO;
 using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Windows.Forms;
 
 internal static class BriskBoot
@@ -136,15 +137,114 @@ internal static class BriskBoot
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BriskLauncher");
         Directory.CreateDirectory(accountsDir);
         command.Append("-Dmcl.accountsDir=").Append(Quote(accountsDir)).Append(' ');
-        if (splash != null)
-        {
-            command.Append("-splash:").Append(Quote(splash)).Append(' ');
-        }
         command.Append("--module-path ").Append(Quote(libDir)).Append(' ');
         command.Append("--module ").Append(MainModule).Append(' ');
         foreach (string extra in args)
         {
             command.Append(extra).Append(' ');
+        }
+
+        // 启动重试阶梯（第 190 轮）：JVM 偶尔会在写出任何日志前就没了（Windows 事件日志里是
+        // Application Hang，退出码 0xCFFFFFFF），此时用户只看到一张卡住的启动图。
+        // 做法与 HMCL 一致：换条件重试，最后必须把原因告诉用户，不能静默消失。
+        string baseCommand = command.ToString();
+        int exitCode = Attempt(java, exeDir, baseCommand, splash, true, null, "第 1 次");
+        // 「静默死亡」= 退出码非 0 且这次没有写出任何启动器日志。只有这种才重试/报错：
+        // 用户自己关掉启动器、或启动器自己报了错（有日志），都不该再弹一个框。
+        bool silent = exitCode != 0 && !lastAttemptProducedLog;
+        if (silent)
+        {
+            BootLog("第 1 次没有产出任何启动器日志（退出码 " + Describe(exitCode)
+                    + "），重试：不带 -splash，并打开启动轨迹");
+            Thread.Sleep(400);
+            exitCode = Attempt(java, exeDir, baseCommand, splash, false,
+                    "-Dmcl.startup.trace=1", "第 2 次（无启动图 + 轨迹）");
+            silent = exitCode != 0 && !lastAttemptProducedLog;
+        }
+        if (silent)
+        {
+            BootLog("第 2 次仍然没有日志，重试：改用软件渲染（-Dprism.order=sw）");
+            Thread.Sleep(400);
+            exitCode = Attempt(java, exeDir, baseCommand, splash, false,
+                    "-Dprism.order=sw -Dmcl.startup.trace=1", "第 3 次（软件渲染）");
+            silent = exitCode != 0 && !lastAttemptProducedLog;
+        }
+        if (silent)
+        {
+            ShowStartupFailure(exitCode, baseCommand, splash);
+        }
+        Environment.Exit(exitCode);
+    }
+
+    /// <summary>上一次尝试有没有写出新的启动器日志（= JVM 至少跑到 SafeLog）。</summary>
+    private static bool lastAttemptProducedLog = true;
+
+    /// <summary>启动阶段最多等这么久还看不到第一行输出，就判定卡死（正常是 1~2 秒）。</summary>
+    private const int StartupOutputTimeoutMs = 30000;
+
+    /// <summary>卡死被我们结束时的退出码（124 = 常见的 timeout 约定）。</summary>
+    private const int HangExitCode = 124;
+
+    private static string Describe(int code)
+    {
+        return code + "（0x" + (code & 0xFFFFFFFFL).ToString("X8") + "）";
+    }
+
+    /// <summary>记录启动器日志目录当前有哪些文件（用来判断「这次尝试有没有写出新日志」）。</summary>
+    private static HashSet<string> SnapshotLauncherLogs(string exeDir)
+    {
+        HashSet<string> files = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            string dir = Path.Combine(exeDir, "data", "logs");
+            if (!Directory.Exists(dir))
+            {
+                return files;
+            }
+            foreach (string file in Directory.GetFiles(dir, "*.log"))
+            {
+                // 游戏会话日志（session-*.log）随时在写，跟启动器有没有起来无关，必须排除，
+                // 否则「有游戏正在跑」会被误判成「启动器写出日志了」→ 不重试（第 190 轮）。
+                // 启动器自己的日志每次启动都是新的 yyyy-MM-dd-HHmmss.log，比 mtime 可靠。
+                if (Path.GetFileName(file).StartsWith("session-", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+                files.Add(file);
+            }
+        }
+        catch (Exception)
+        {
+            // 读不到就当成空集合 → 仍然重试，宁可多重试一次
+        }
+        return files;
+    }
+
+    /// <summary>快照之后有没有出现新的启动器日志文件。</summary>
+    private static bool HasNewLauncherLog(string exeDir, HashSet<string> before)
+    {
+        HashSet<string> now = SnapshotLauncherLogs(exeDir);
+        now.ExceptWith(before);
+        return now.Count > 0;
+    }
+
+    /// <summary>
+    /// 跑一次 JVM，返回退出码。
+    ///
+    /// <p>只在**启动阶段**看是否卡死：30 秒内连一行输出都没有（正常 1~2 秒就有），
+    /// 就强制结束并回传 {@link HangExitCode}；一旦有输出就继续陪跑到用户关闭启动器。
+    /// </summary>
+    private static int Attempt(string java, string exeDir, string baseCommand, string splash,
+                               bool withSplash, string extraArgs, string label)
+    {
+        StringBuilder command = new StringBuilder(baseCommand);
+        if (withSplash && splash != null)
+        {
+            command.Append("-splash:").Append(Quote(splash)).Append(' ');
+        }
+        if (!String.IsNullOrEmpty(extraArgs))
+        {
+            command.Append(extraArgs).Append(' ');
         }
 
         ProcessStartInfo start = new ProcessStartInfo
@@ -157,16 +257,17 @@ internal static class BriskBoot
             RedirectStandardOutput = true,
             RedirectStandardError = true,
         };
-        BootLog("准备启动 JVM：" + java);
-        // 把完整命令行也记下来：JVM 崩在 main 之前时，可以让用户直接复制到 cmd 里复现，
-        // winexe 看到的退出码（例如 0xCFFFFFFF）本身没有信息量。
-        BootLog("命令行：" + java + " " + command.ToString());
+        BootLog("[" + label + "] 准备启动 JVM：" + java);
+        BootLog("[" + label + "] 命令行：" + java + " " + command);
+        HashSet<string> logsBefore = SnapshotLauncherLogs(exeDir);
         using (Process child = new Process { StartInfo = start })
         {
+            bool[] sawOutput = new bool[1];
             child.OutputDataReceived += (sender, e) =>
             {
                 if (e.Data != null)
                 {
+                    sawOutput[0] = true;
                     BootLog("JVM  " + e.Data);
                 }
             };
@@ -174,26 +275,61 @@ internal static class BriskBoot
             {
                 if (e.Data != null)
                 {
+                    sawOutput[0] = true;
                     BootLog("JVM! " + e.Data);
                 }
             };
             child.Start();
             child.BeginOutputReadLine();
             child.BeginErrorReadLine();
-            BootLog("JVM 已拉起，等待退出");
+            BootLog("[" + label + "] JVM 已拉起，等待第一行输出（最多 "
+                    + (StartupOutputTimeoutMs / 1000) + " 秒）");
+            DateTime deadline = DateTime.UtcNow.AddMilliseconds(StartupOutputTimeoutMs);
+            while (!sawOutput[0] && !child.HasExited && DateTime.UtcNow < deadline)
+            {
+                Thread.Sleep(100);
+            }
+            if (!sawOutput[0] && !child.HasExited)
+            {
+                BootLog("[" + label + "] 超过 " + (StartupOutputTimeoutMs / 1000)
+                        + " 秒没有任何输出，判定卡死（Windows 也会把它标成 Application Hang）");
+                try
+                {
+                    child.Kill();
+                }
+                catch (Exception)
+                {
+                    // 已经退出就算了
+                }
+                try
+                {
+                    child.WaitForExit(3000);
+                }
+                catch (Exception)
+                {
+                }
+                lastAttemptProducedLog = HasNewLauncherLog(exeDir, logsBefore);
+                return HangExitCode;
+            }
             // 继续持有管道直到子进程结束：提前退出会让子进程写 stdout 时报错甚至卡住
             child.WaitForExit();
             int code = child.ExitCode;
-            string hex = "0x" + (code & 0xFFFFFFFFL).ToString("X8");
-            BootLog("JVM 已退出，退出码 " + code + "（" + hex + "）");
-            if (code != 0 && !File.Exists(Path.Combine(exeDir, "data", "logs",
-                    DateTime.Now.ToString("yyyy-MM-dd") + "*.log")))
-            {
-                BootLog("提示：JVM 在写出任何日志前就退出了，请把上面的命令行复制到 cmd 里执行，"
-                        + "查看 java 打印的错误");
-            }
-            Environment.Exit(child.ExitCode);
+            BootLog("[" + label + "] JVM 已退出，退出码 " + Describe(code));
+            lastAttemptProducedLog = HasNewLauncherLog(exeDir, logsBefore);
+            return code;
         }
+    }
+
+    /// <summary>三次都失败时把原因讲清楚（旧版只写进引导器日志，用户双击后什么都看不到）。</summary>
+    private static void ShowStartupFailure(int exitCode, string baseCommand, string splash)
+    {
+        string text = "Brisk Launcher 没能启动（退出码 " + Describe(exitCode) + "）。\n\n"
+                + "已经自动重试 3 次（关掉启动图、改用软件渲染），都没有成功。\n\n"
+                + "可以把下面这条命令复制到「命令提示符」执行，看 java 自己报什么错：\n\n"
+                + "java " + baseCommand + (splash == null ? "" : "-splash:" + Quote(splash) + " ")
+                + "\n\n"
+                + "引导器日志（每次尝试的结果都在里面）：\n" + bootLogPath;
+        MessageBox.Show(text, "Brisk Launcher", MessageBoxButtons.OK, MessageBoxIcon.Error);
     }
 
     // ---------- 内嵌资源：单目录同步（补写 + 删旧） ----------

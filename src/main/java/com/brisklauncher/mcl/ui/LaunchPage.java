@@ -63,8 +63,10 @@ public final class LaunchPage extends HBox implements MclPage {
     private final StackPane rightPane = new StackPane();
     private final SkinLibraryPane skinPane;
     private final VBox javaPanel;
-    private final Label instanceLabel = new Label(I18n.t("launch.instance.none"));
-    private final Label accountLabel = new Label(I18n.t("account.no_current"));
+    // 版本 id 与账号名都可能带下划线（1.16.5_Fabric / xiaojiu_114514）：
+    // JavaFX 的 Button 类控件默认会把 _ 当助记符吞掉，Label 虽然默认不吞，仍然显式关掉（第 190 轮）
+    private final Label instanceLabel = UiKit.noMnemonic(new Label(I18n.t("launch.instance.none")));
+    private final Label accountLabel = UiKit.noMnemonic(new Label(I18n.t("account.no_current")));
     private final Label metaLabel = new Label("—");
     private final Button launchButton = new Button(I18n.t("launch.button.start"));
     /** 启动按钮旁的快捷版本管理按钮（选中实例后启用）。 */
