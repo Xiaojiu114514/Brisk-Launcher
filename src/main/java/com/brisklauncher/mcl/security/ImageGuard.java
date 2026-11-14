@@ -144,6 +144,14 @@ public final class ImageGuard {
                 int height = ((data[28] & 0xFF) | ((data[29] & 0xFF) << 8)) & 0x3FFF;
                 return new int[]{width, height};
             }
+            if ("VP8L".equals(kind) && data.length > 25 && (data[20] & 0xFF) == 0x2F) {
+                // VP8L 位元流：1 byte signature (0x2F) + 14-bit (width-1) + 14-bit (height-1)
+                int bits = (data[21] & 0xFF) | ((data[22] & 0xFF) << 8)
+                        | ((data[23] & 0xFF) << 16) | ((data[24] & 0xFF) << 24);
+                int width = (bits & 0x3FFF) + 1;
+                int height = ((bits >>> 14) & 0x3FFF) + 1;
+                return new int[]{width, height};
+            }
             return null;
         }
         // JPEG：逐段找 SOFn

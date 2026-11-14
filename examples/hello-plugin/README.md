@@ -1,6 +1,6 @@
 # Hello Plugin（示例插件）
 
-这是 [`PLUGIN_DEV.md`](../../PLUGIN_DEV.md) 里用的可运行示例。它一次示范了当前插件 API 的全部主要能力：
+这是 [`PLUGIN_DEV.md`](../../docs/PLUGIN_DEV.md) 里用的可运行示例。它一次示范了当前插件 API 的全部主要能力：
 
 | 能力 | 在哪里 | 说明 |
 |---|---|---|
@@ -16,8 +16,7 @@
 ## 构建
 
 ```powershell
-# 先在项目根目录把启动器编译一次（二者之一）
-mvn -o compile
+# 先在项目根目录把启动器编译成目录版（带依赖 jar；推荐）
 gradle installDist
 
 # 再打包示例插件
@@ -25,6 +24,9 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 # 直接装进 data\plugins\：
 powershell -ExecutionPolicy Bypass -File build.ps1 -Install
 ```
+
+> `mvn -o compile` 只产出 `target\classes`，没有 JavaFX / Jackson jar，`build.ps1` 会编不过；
+> 要用它的话请自己把依赖 jar 补进 classpath。
 
 产物是 `hello-plugin.jar`（`plugin.json` 与 `i18n/` 在 jar 根目录）。
 

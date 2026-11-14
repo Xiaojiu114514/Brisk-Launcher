@@ -66,6 +66,7 @@ public final class ToolsPage extends VBox implements MclPage {
             disposePanels();
             plugins.reload();
             reload();
+            com.brisklauncher.mcl.MclApplication.refreshPluginUi();
         });
         status.getStyleClass().add("cat-hint");
         HBox toolbar = new HBox(8, importPlugin, openDir, openData, refresh, status);
@@ -92,6 +93,7 @@ public final class ToolsPage extends VBox implements MclPage {
             plugins.setEnabled(entry.id(), enabled);
             plugins.reload();
             reload();
+            com.brisklauncher.mcl.MclApplication.refreshPluginUi();
         });
         removeButton.setOnAction(e -> {
             PluginManager.Entry entry = list.getSelectionModel().getSelectedItem();
@@ -103,6 +105,7 @@ public final class ToolsPage extends VBox implements MclPage {
                         disposePanels();
                         plugins.remove(entry);
                         reload();
+                        com.brisklauncher.mcl.MclApplication.refreshPluginUi();
                     });
         });
         HBox switches = new HBox(10, enabledBox, removeButton);
@@ -129,7 +132,8 @@ public final class ToolsPage extends VBox implements MclPage {
                 UiKit.catHint(I18n.t("tools.subtitle")),
                 riskNote,
                 toolbar, body);
-        // 插件卸载（刷新 / 停用 / 移除）前先把面板收干净，否则插件资源不会释放
+        // 卸载前先丢掉面板引用；真正的资源释放由 PluginManager.unloadAll() 呼叫 onUnload()。
+        // 页面切走只释放面板节点，不能在这里呼叫 onUnload()（否则外挂还载入着就被当成卸载）。
         plugins.addBeforeUnloadListener(unloadHook);
         reload();
     }
@@ -147,18 +151,17 @@ public final class ToolsPage extends VBox implements MclPage {
         list.setItems(javafx.collections.FXCollections.observableArrayList());
     }
 
+    /**
+     * 丟掉面板引用，讓 JavaFX 節點可以被回收。
+     *
+     * <p>這裡刻意<b>不</b>呼叫 {@link com.brisklauncher.mcl.plugin.api.LauncherPlugin#onUnload()}：
+     * onUnload() 是「外掛要從 jar 卸載」的訊號，只能由
+     * {@link PluginManager#unloadAll()} 呼叫一次。頁面切換只是把面板節點丟掉；
+     * 面板若自己開了長生命週期資源，請掛在 onLoad/onUnload 或頁面的 onDispose。
+     */
     private void disposePanels() {
-        for (Map.Entry<String, Node> entry : panels.entrySet()) {
-            PluginManager.Entry descriptor = plugins.find(entry.getKey());
-            if (descriptor != null && descriptor.plugin() != null) {
-                try {
-                    descriptor.plugin().onUnload();
-                } catch (Exception ignored) {
-                    // 插件自己的清理失败不影响页面
-                }
-            }
-        }
         panels.clear();
+        content.getChildren().clear();
     }
 
     private void reload() {
@@ -270,6 +273,7 @@ public final class ToolsPage extends VBox implements MclPage {
             disposePanels();
             plugins.install(file.toPath());
             reload();
+            com.brisklauncher.mcl.MclApplication.refreshPluginUi();
             MCLDialog.info(getScene().getWindow(), I18n.t("tools.import"),
                     I18n.t("tools.imported", file.getName()));
         } catch (Exception error) {

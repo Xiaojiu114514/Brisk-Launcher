@@ -3,8 +3,8 @@ package com.brisklauncher.mcl.plugin.api;
 /**
  * 插件 API 的版本常数。
  *
- * <p>启动器在载入插件时会把这里的值告诉插件（{@link PluginContext#launcherVersion()} 是启动器版本，
- * 这里是 <b>API</b> 版本）。插件可以在 {@code onLoad} 里做一次判断，自己决定要不要降级运行。
+ * <p>这是外挂编译期可见的 API 版本；{@code plugin.json} 的 {@code "apiVersion"} 由启动器在载入时
+ * 检查（比启动器高就拒绝）。运行期没有「启动器 API 版本」查询方法，{@code VERSION} 是编译期常数。
  *
  * <p>规则：加方法 = 次版本号 +1；删方法或改语义 = 主版本号 +1。
  */

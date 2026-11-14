@@ -5,6 +5,7 @@ import com.brisklauncher.mcl.i18n.I18n;
 import com.brisklauncher.mcl.java.JdkInfo;
 import com.brisklauncher.mcl.setting.LauncherSettings;
 import com.brisklauncher.mcl.setting.Packs;
+import com.brisklauncher.mcl.setting.ThemePacks;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -12,6 +13,7 @@ import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
+import javafx.scene.control.ListCell;
 import javafx.scene.control.PasswordField;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Spinner;
@@ -44,7 +46,9 @@ public final class SettingsPage extends VBox implements MclPage {
     private final Spinner<Integer> timeout = new Spinner<>(5, 300, 30);
     private final Spinner<Integer> memory = new Spinner<>(512, 65536, 4096, 256);
     private final ComboBox<String> language = new ComboBox<>();
-    private final ComboBox<String> theme = new ComboBox<>();
+    /** 主題用物件而非字串：同名/同作者的主題才不會在下拉裡撞在一起。 */
+    private final ComboBox<ThemePacks.Theme> theme = new ComboBox<>();
+    private boolean updatingThemes;
     /** 主题详情（缩图 + 说明 + 作者/版本 + 警告）。 */
     private final Label themeDesc = new Label();
     private final Label themeMeta = new Label();
@@ -179,6 +183,8 @@ public final class SettingsPage extends VBox implements MclPage {
         rescanTheme.setOnAction(e -> {
             com.brisklauncher.mcl.setting.ThemePacks.invalidate();
             reloadThemes();
+            // 同一個主題也可能剛改過 CSS；重建下拉不會觸發 value listener，這裡手動刷新一次。
+            com.brisklauncher.mcl.MclApplication.refreshTheme(getScene());
         });
         HBox actions = new HBox(8, openLang, openTheme, rescanTheme);
         grid.addRow(2, new Label(""), actions);
@@ -210,38 +216,60 @@ public final class SettingsPage extends VBox implements MclPage {
         themeInfo.setVisible(false);
         themeInfo.setManaged(false);
 
+        theme.setCellFactory(view -> new ThemeCell());
+        theme.setButtonCell(new ThemeCell());
         reloadThemes();
         theme.valueProperty().addListener((obs, oldValue, value) -> {
-            if (value == null) {
+            if (value == null || updatingThemes) {
                 return;
             }
-            for (com.brisklauncher.mcl.setting.ThemePacks.Theme candidate
-                    : com.brisklauncher.mcl.setting.ThemePacks.all()) {
-                if (candidate.displayName().equals(value)) {
-                    com.brisklauncher.mcl.setting.ThemePacks.setCurrent(candidate.id());
-                    // 热重载：样式 + 背景 + 圆角一次刷新，不用重启
-                    com.brisklauncher.mcl.MclApplication.refreshTheme(getScene());
-                    refreshThemeDetails(candidate);
-                    // 原生啟動圖也要跟著換（背景畫，下次啟動就是這個主題的顏色）
-                    com.brisklauncher.mcl.ui.NativeSplashService.ensureUpToDateAsync();
-                    return;
-                }
-            }
+            ThemePacks.setCurrent(value.id());
+            // 热重载：样式 + 背景 + 圆角一次刷新，不用重启
+            com.brisklauncher.mcl.MclApplication.refreshTheme(getScene());
+            refreshThemeDetails(value);
+            // 原生啟動圖也要跟著換（背景畫，下次啟動就是這個主題的顏色）
+            com.brisklauncher.mcl.ui.NativeSplashService.ensureUpToDateAsync();
         });
     }
 
     /** 重新扫一遍主题目录并重建下拉（保留当前选择）。 */
     private void reloadThemes() {
-        var themes = com.brisklauncher.mcl.setting.ThemePacks.all();
-        theme.getItems().clear();
-        for (var item : themes) {
-            theme.getItems().add(item.displayName());
+        var themes = ThemePacks.all();
+        updatingThemes = true;
+        try {
+            theme.getItems().setAll(themes);
+            String currentId = ThemePacks.currentId();
+            var current = themes.stream().filter(item -> item.id().equals(currentId))
+                    .findFirst().orElse(themes.get(0));
+            theme.setValue(current);
+            refreshThemeDetails(current);
+        } finally {
+            updatingThemes = false;
         }
-        String currentId = com.brisklauncher.mcl.setting.ThemePacks.currentId();
-        var current = themes.stream().filter(item -> item.id().equals(currentId))
-                .findFirst().orElse(themes.get(0));
-        theme.getSelectionModel().select(current.displayName());
-        refreshThemeDetails(current);
+    }
+
+    /** 下拉顯示：名稱（作者）· 版本 · id；同 id 不會重複（default 保留 id 已在掃描時忽略）。 */
+    private static String themeLabel(ThemePacks.Theme item) {
+        if (item == null) {
+            return "";
+        }
+        StringBuilder label = new StringBuilder(item.displayName());
+        if (!item.version().isBlank()) {
+            label.append(" · v").append(item.version());
+        }
+        if (!ThemePacks.DEFAULT_ID.equals(item.id())) {
+            label.append(" · ").append(item.id());
+        }
+        return label.toString();
+    }
+
+    /** 主題下拉的 cell：物件本身是 key，顯示文字才做組合。 */
+    private static final class ThemeCell extends ListCell<ThemePacks.Theme> {
+        @Override
+        protected void updateItem(ThemePacks.Theme item, boolean empty) {
+            super.updateItem(item, empty);
+            setText(empty || item == null ? null : themeLabel(item));
+        }
     }
 
     /** 缩图（存在才显示）+ 说明 + 作者/版本 + 安全警告。 */

@@ -19,7 +19,11 @@ isolation by default, multi-threaded downloads.
 A plugin is a jar in `data\plugins\`. It can add a tool panel, a navigation page, its own language pack,
 its own config folder, services for other plugins, and even account (auth) providers.
 API reference, `plugin.json` format, lifecycle, packaging and a working sample:
-**[Plugin development guide →](docs/PLUGIN_DEV.md)** · [sample plugin](examples/hello-plugin/)
+**[Plugin development guide →](docs/PLUGIN_DEV.md)** ·
+**[API signatures →](docs/PLUGIN_API.md)** · [sample plugin](examples/hello-plugin/)
+
+> Third-party plugins and themes run at your own risk. The launcher warns before the first third-party
+> plugin load, but there is no sandbox and no per-capability permission model.
 
 ## Theme development
 
@@ -47,16 +51,20 @@ Output: `build\distributions\BriskLauncher.exe` — one self-contained file (~30
 - Releasing: upload **only** `BriskLauncher.exe` to GitHub Releases. The built-in updater downloads that same exe and replaces itself after the launcher exits.
 ## Data locations
 
-Everything the launcher writes lives next to the exe (portable), except the account list:
+Game data (themes, language packs, plugins, the downloaded JRE) lives next to the exe (portable).
+Launcher-private files — account list, session tokens, `launcher.json`, logs and the trust/ack records —
+live in `%LOCALAPPDATA%\BriskLauncher\`:
 
 | Path | Contents |
 |---|---|
 | `runtime/lib/` | jars extracted from the exe on first launch; reused and pruned automatically |
-| `data/` | launcher settings, themes, language packs, plugins, logs, cache |
+| `data/` | themes, language packs, plugins, `plugin-data/`, cache, downloaded JRE |
 | `minecraft/` | the built-in game directory (`versions/<id>/`) |
-| `%LOCALAPPDATA%\BriskLauncher\` | `accounts.json` and session tokens — shared by every copy of the launcher on this Windows user |
+| `%LOCALAPPDATA%\BriskLauncher\` | `accounts.json`, session tokens, `launcher.json`, `secret.key`, `acks.json`, `plugin-trust.json`, `logs/` — shared by every copy of the launcher on this Windows user |
 
-Because accounts live outside `data/`, running the exe from another folder still sees the same accounts.
+Because the private files live outside `data/`, running the exe from another folder still sees the same
+accounts and settings. Logs are one file per start (`logs/yyyy-MM-dd-HHmmss.log`), not a rotating
+`launcher.log`.
 ## License
 
 See [LICENSE](LICENSE).

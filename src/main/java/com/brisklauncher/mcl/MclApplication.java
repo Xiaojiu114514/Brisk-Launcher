@@ -73,6 +73,8 @@ public final class MclApplication extends Application {
 
     private String currentPageKey = "launch";
     private boolean transitioning;
+    /** 外掛清單變更後排程中的 UI 重建（避免同一輪重複 rebuild）。 */
+    private volatile boolean pluginUiRefreshScheduled;
     private static java.nio.file.Path screenshotPath;
     private static String languageOverride;
     private static String languageSwitch;
@@ -954,6 +956,27 @@ public final class MclApplication extends Application {
         }
     }
 
+    /**
+     * 外掛清單變更後重建頂欄與導航頁（Refresh / 匯入 / 停用 / 移除）。
+     *
+     * <p>導航頁的 {@code PageRef} 是在 {@link #buildUi()} 時捕捉的；只呼叫
+     * {@code PluginManager.reload()} 不會更新頂欄。這裡排到 FX 下一個脈衝再重建，
+     * 避免在 ToolsPage 的按鈕事件裡直接釋放自己。
+     */
+    public static void refreshPluginUi() {
+        MclApplication app = instance;
+        if (app == null || app.pluginUiRefreshScheduled) {
+            return;
+        }
+        app.pluginUiRefreshScheduled = true;
+        Platform.runLater(() -> {
+            app.pluginUiRefreshScheduled = false;
+            if (instance == app) {
+                app.rebuildUi();
+            }
+        });
+    }
+
     private void buildUi() {
         startupOverlay = new StartupOverlay();
 
@@ -976,6 +999,8 @@ public final class MclApplication extends Application {
         pageSuppliers.put("settings", () -> new SettingsPage(context));
 
         // 插件贡献的导航页：顶栏插在「工具」与「设置」之间
+        // 先丢掉上一轮的插件页 supplier，避免被移除的外挂（与其 classloader）被旧的 lambda 留住。
+        pageSuppliers.keySet().removeIf(key -> key.startsWith("p:"));
         List<com.brisklauncher.mcl.ui.TopBar.NavItem> pluginNav = new ArrayList<>();
         try {
             for (var ref : context.plugins().pages()) {

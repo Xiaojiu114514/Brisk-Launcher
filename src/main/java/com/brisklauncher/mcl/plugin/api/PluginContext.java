@@ -10,8 +10,9 @@ import java.util.List;
 /**
  * 给插件用的受限上下文：启动器愿意开放给插件的全部能力都在这里。
  *
- * <p>刻意只暴露 JDK / JavaFX / Jackson 型别与 {@code auth.api}，不暴露启动器内部类——
- * 外部插件是独立编译的，不该跟启动器版本互相绑死。
+ * <p>穩定的 API 只有本包與 {@code auth.api}；啟動器 module 還歷史性地 export 了
+ * {@code com.brisklauncher.mcl} 與 {@code com.brisklauncher.mcl.i18n}，那些只是內部實作
+ * （root 套件包含 {@code AppPaths}），不保證相容，也不構成沙箱。
  *
  * <p><b>目录约定</b>：
  * <ul>

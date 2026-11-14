@@ -17,7 +17,11 @@
 
 外掛就是一個放在 `data\plugins\` 下的 jar，可以加工具面板、導覽頁、自己的語言包、自己的設定資料夾、
 給別的外掛用的服務，甚至帳號認證實作。API 參考、`plugin.json` 格式、生命週期、打包與可執行範例見
-**[外掛開發指南 →](PLUGIN_DEV.md)** · [範例外掛](../examples/hello-plugin/)
+**[外掛開發指南 →](PLUGIN_DEV.md)** ·
+**[API 簽名 →](PLUGIN_API.md#繁體中文)** · [範例外掛](../examples/hello-plugin/)
+
+> 第三方外掛與主題由使用者自行承擔風險。啟動器會在第一次載入第三方外掛前提示，但沒有沙箱，
+> 也沒有逐項權限模型。
 
 ## 主題開發
 
@@ -44,16 +48,18 @@ gradle bootExe
 - 發佈：GitHub Release **只上傳** `BriskLauncher.exe`；內建更新器下載的也是這個 exe，結束後自動替換自己。
 ## 資料位置
 
-除了帳號清單，所有執行期資料都在 exe 旁邊（可攜）：
+遊戲資料（主題、語言包、外掛、下載的 JRE）在 exe 旁邊（可攜）。啟動器私有檔案 —— 帳號清單、
+工作階段權杖、`launcher.json`、日誌、信任/確認記錄 —— 在 `%LOCALAPPDATA%\BriskLauncher\`：
 
 | 路徑 | 內容 |
 |---|---|
 | `runtime/lib/` | 首次啟動從 exe 裡釋放出來的 jar（自動重用、自動清理舊版本） |
-| `data/` | 啟動器設定、主題、語言包、外掛、日誌、快取 |
+| `data/` | 主題、語言包、外掛、`plugin-data/`、快取、下載的 JRE |
 | `minecraft/` | 內建遊戲目錄（`versions/<id>/`） |
-| `%LOCALAPPDATA%\BriskLauncher\` | `accounts.json` 與會話權杖（同一個 Windows 使用者的所有啟動器副本共用） |
+| `%LOCALAPPDATA%\BriskLauncher\` | `accounts.json`、工作階段權杖、`launcher.json`、`secret.key`、`acks.json`、`plugin-trust.json`、`logs/` —— 同一個 Windows 使用者的所有啟動器副本共用 |
 
-帳號不在 `data/` 裡，所以把 exe 換到別的目錄執行也還是同一份帳號。
+私有檔案不在 `data/` 裡，所以把 exe 換到別的目錄執行也還是同一份帳號與設定。日誌每次啟動一個檔案
+（`logs/yyyy-MM-dd-HHmmss.log`），不是輪替的 `launcher.log`。
 ## 授權
 
 見 [LICENSE](../LICENSE)。

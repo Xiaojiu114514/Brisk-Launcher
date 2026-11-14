@@ -31,9 +31,9 @@ import java.util.concurrent.TimeUnit;
  * 「控件實際渲染出來的顏色」，確保每個主題都能真正改到背景、輸入框、ComboBox、按鈕、勾選框、
  * 滾動條與文字色。
  *
- * <p>跑法（先 {@code mvn -o compile}）：
+ * <p>跑法（先 {@code gradle installDist}）：
  * <pre>
- *   java -Dprism.order=sw -cp "target\classes;build\install\brisk-launcher\lib\*" \
+ *   java -Dprism.order=sw -cp "build\classes\java\main;build\install\brisk-launcher\lib\*" \
  *        com.brisklauncher.mcl.ui.ThemeCssSelfTest
  * </pre>
  * 結束碼 0 = 全過。

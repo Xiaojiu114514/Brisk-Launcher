@@ -77,7 +77,7 @@ public final class GameLauncher {
     private static final Pattern PLACEHOLDER = Pattern.compile("\\$\\{[^}]+}");
     private static final DateTimeFormatter LOG_TIME = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
     private static final String LAUNCHER_NAME = "BriskLauncher";
-    private static final String LAUNCHER_VERSION = "1.1.4";
+    private static final String LAUNCHER_VERSION = "1.1.5";
     /** 数 mods 时的上限（只用来分档，不需要精确值）。 */
     private static final int MOD_COUNT_CAP = 255;
 

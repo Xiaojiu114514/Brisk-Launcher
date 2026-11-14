@@ -203,8 +203,9 @@ public final class MclContext {
         // 遗留的 *.tmp（move 失败留下的）在背景清掉，别让 data/cache 越滚越大
         MclApplication.trace("ctx: cleanStaleTempFiles");
         com.brisklauncher.mcl.AppPaths.cleanStaleTempFiles();
-        // 安全审计 L-03：frpc.toml 里有明文 token，上次异常退出可能留下残留
-        frp.cleanStaleConfig();
+        // 安全審計 L-03：配置裡有明文 token —— 第 192 輪起「保留 + 收緊權限」，
+        // 讓聯機頁面下次打開能自動填回（含玩家丟進 data/online/frp 的 frpc.toml / frpc.ini）。
+        frp.secureSavedConfig();
         MclApplication.trace("ctx: Packs.ensure");
         com.brisklauncher.mcl.setting.Packs.ensure();
         MclApplication.trace("ctx: LauncherLock");

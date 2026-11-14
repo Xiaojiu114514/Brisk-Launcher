@@ -3,9 +3,9 @@
 #   powershell -ExecutionPolicy Bypass -File build.ps1
 #   powershell -ExecutionPolicy Bypass -File build.ps1 -Install
 #
-# Requires: JAVA_HOME -> JDK 21, and the launcher must have been built once
-# (target\classes from `mvn -o compile`, or build\install\brisk-launcher\lib from
-#  `gradle installDist`).
+# Requires: JAVA_HOME -> JDK 21, and the launcher must have been built with
+# `gradle installDist` (build\install\brisk-launcher\lib contains JavaFX / Jackson).
+# `mvn -o compile` alone only produces target\classes and lacks those jars.
 param(
     [switch]$Install
 )
@@ -22,17 +22,12 @@ $javac = Join-Path $env:JAVA_HOME "bin\javac.exe"
 $jarTool = Join-Path $env:JAVA_HOME "bin\jar.exe"
 
 $lib = Join-Path $project "build\install\brisk-launcher\lib"
-$classes = Join-Path $project "target\classes"
-if (-not (Test-Path $lib) -and -not (Test-Path $classes)) {
-    throw "Build the launcher first: 'mvn -o compile' (target\classes) or 'gradle installDist' (build\install)."
+if (-not (Test-Path $lib)) {
+    throw "Build the launcher first with 'gradle installDist' (need build\install\brisk-launcher\lib)."
 }
 
-# Prefer freshly compiled classes, then the API jars that ship with the launcher.
-$cp = ""
-if (Test-Path $classes) { $cp = $classes }
-if (Test-Path $lib) {
-    $cp = if ($cp) { $cp + ";" + (Join-Path $lib "*") } else { Join-Path $lib "*" }
-}
+# Use the launcher's install lib: it has the API classes plus JavaFX / Jackson.
+$cp = Join-Path $lib "*"
 
 $out = Join-Path $here "out"
 Remove-Item -Force -Recurse $out -ErrorAction SilentlyContinue

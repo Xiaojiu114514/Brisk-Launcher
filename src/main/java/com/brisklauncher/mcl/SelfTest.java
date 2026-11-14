@@ -315,6 +315,63 @@ public final class SelfTest {
         check("frp.toml", toml.contains("serverAddr") && toml.contains("[[proxies]]")
                         && toml.contains("localPort = 25565"),
                 "toml length=" + toml.length());
+        // 第 191 輪：frpc.toml 要能原樣解析回來（聯機頁面靠這個把輸入框填回）
+        var parsed = com.brisklauncher.mcl.online.FrpService.parseToml(toml).orElse(null);
+        check("frp.tomlParse", parsed != null
+                        && "frps.example.com".equals(parsed.serverAddr())
+                        && parsed.serverPort() == 7000
+                        && "token123".equals(parsed.token())
+                        && parsed.localPort() == 25565
+                        && parsed.remotePort() == 25565,
+                "parsed=" + (parsed == null ? "null" : parsed.serverAddr() + ":" + parsed.serverPort()));
+        // 有註解 / 手改過的配置也要吃得下
+        var edited = com.brisklauncher.mcl.online.FrpService.parseToml("""
+                # 手改的配置
+                serverAddr = "1.2.3.4"   # 家裡的 frps
+                serverPort = 7500
+                auth.token = "a\\\\b"
+                [[proxies]]
+                localPort = 25566
+                remotePort = 25599
+                """).orElse(null);
+        check("frp.tomlParseEdited", edited != null
+                        && "1.2.3.4".equals(edited.serverAddr())
+                        && edited.serverPort() == 7500
+                        && "a\\b".equals(edited.token())
+                        && edited.localPort() == 25566
+                        && edited.remotePort() == 25599,
+                "edited=" + (edited == null ? "null" : edited.serverAddr()));
+        check("frp.tomlParseEmpty",
+                com.brisklauncher.mcl.online.FrpService.parseToml("").isEmpty(),
+                "blank -> empty");
+        // 第 192 輪：工作目錄搬到 data/online/frp；資料夾內的 frpc.ini 也要能填回輸入框
+        Path frpDir = context.frp().workDir();
+        check("frp.dir", "frp".equals(frpDir.getFileName().toString())
+                        && frpDir.getParent() != null
+                        && "online".equals(frpDir.getParent().getFileName().toString()),
+                "dir=" + frpDir);
+        var ini = com.brisklauncher.mcl.online.FrpService.parseConfig("frpc.ini", """
+                # 服務商給的模板
+                [common]
+                server_addr = 1.2.3.4
+                server_port = 7000
+                token = abc
+
+                [mc]
+                type = tcp
+                local_port = 25566
+                remote_port = 25599
+                """).orElse(null);
+        check("frp.iniParse", ini != null
+                        && "1.2.3.4".equals(ini.serverAddr())
+                        && ini.serverPort() == 7000
+                        && "abc".equals(ini.token())
+                        && ini.localPort() == 25566
+                        && ini.remotePort() == 25599,
+                "ini=" + (ini == null ? "null" : ini.serverAddr() + ":" + ini.serverPort()));
+        check("frp.iniParseEmpty",
+                com.brisklauncher.mcl.online.FrpService.parseIni("").isEmpty(),
+                "blank -> empty");
         check("frp.portCheck", true, "25565 open="
                 + com.brisklauncher.mcl.online.FrpService.isLocalPortOpen(25565));
     }

@@ -13,8 +13,10 @@ module com.brisklauncher.mcl {
     requires com.sun.jna.platform;
 
 
+    // 历史遗留：启动器入口 / AppPaths / MclContext；插件可用但不保证兼容、不是安全边界。
     exports com.brisklauncher.mcl;
     exports com.brisklauncher.mcl.auth.api;
+    // 历史遗留：语言包内部 API；插件可用但不保证兼容。
     exports com.brisklauncher.mcl.i18n;
     // 插件 API：外部插件 jar 只认这个包（工具页 / 导航页 / data/plugins）
     exports com.brisklauncher.mcl.plugin.api;

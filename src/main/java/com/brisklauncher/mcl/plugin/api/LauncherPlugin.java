@@ -17,12 +17,13 @@ import java.util.List;
  * <p>两种插件走同一套接口。外部插件只依赖本包（{@code com.brisklauncher.mcl.plugin.api}）
  * 与 JDK / JavaFX 类型，不需要、也不该引用启动器内部类。
  *
- * <p><b>生命周期</b>（外部插件）：
+ * <p><b>生命週期</b>（外部插件）：
  * <pre>
- *   扫描 jar → plugin.json → 禁用/信任检查 → 实例化（public 无参构造器）
- *     → onLoad(PluginContext)          // 每个实例一次，可能不在 FX 线程
- *     → createPanel(PluginContext)     // 只在用户点开这个工具时调用，一定在 FX 线程
- *     → onUnload()                     // 插件被移除 / 刷新 / 启动器退出
+ *   掃描 jar → plugin.json → 禁用/信任檢查 → 實例化（public 無參構造器）
+ *     → onLoad(PluginContext)          // 每個實例一次；啟動時在背景執行緒、Refresh 時在 FX
+ *     → pages()                        // 與 onLoad 同一執行緒，不要在這裡建 JavaFX 節點
+ *     → createPanel(PluginContext)     // 只在使用者點開這個工具時呼叫，一定在 FX 執行緒
+ *     → onUnload()                     // 外掛被移除 / 刷新 / 啟動器退出（離開頁面不會呼叫）
  * </pre>
  *
  * <p><b>能力</b>：{@link #createPanel(PluginContext)} 提供一个工具面板（工具页），

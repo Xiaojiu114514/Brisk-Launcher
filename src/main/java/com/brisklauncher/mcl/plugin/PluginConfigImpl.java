@@ -67,8 +67,25 @@ final class PluginConfigImpl implements PluginConfig {
 
     @Override
     public boolean getBoolean(String key, boolean fallback) {
-        String value = get(key, Boolean.toString(fallback)).trim();
-        return "true".equalsIgnoreCase(value) || "1".equals(value) || "yes".equalsIgnoreCase(value);
+        // 缺键才用 fallback；鍵存在但值是「看不懂的字串」也回 fallback，
+        // 不要靜默變成 false（true/1/yes、false/0/no 之外都視為無效）。
+        String value = get(key, null);
+        if (value == null) {
+            return fallback;
+        }
+        String normalized = value.trim();
+        if (normalized.isEmpty()) {
+            return fallback;
+        }
+        if ("true".equalsIgnoreCase(normalized) || "1".equals(normalized)
+                || "yes".equalsIgnoreCase(normalized)) {
+            return true;
+        }
+        if ("false".equalsIgnoreCase(normalized) || "0".equals(normalized)
+                || "no".equalsIgnoreCase(normalized)) {
+            return false;
+        }
+        return fallback;
     }
 
     @Override

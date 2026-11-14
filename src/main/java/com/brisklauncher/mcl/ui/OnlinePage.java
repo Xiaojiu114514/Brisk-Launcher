@@ -11,9 +11,8 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.LocalTime;
-import java.time.format.DateTimeFormatter;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
 import java.util.regex.Pattern;
 import javafx.animation.KeyFrame;
 import javafx.animation.KeyValue;
@@ -24,6 +23,7 @@ import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
+import javafx.scene.control.PasswordField;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.control.ToggleButton;
@@ -39,12 +39,12 @@ import javafx.stage.FileChooser;
 import javafx.util.Duration;
 
 public final class OnlinePage extends VBox implements MclPage {
-   private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("HH:mm:ss");
    private static final Pattern ROOM_CODE = Pattern.compile("U/[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}");
    private final MclContext context;
    private final TextField server = new TextField();
    private final TextField serverPort = new TextField("7000");
-   private final TextField token = new TextField();
+   /** token 用密碼樣式顯示（仍是 TextField 子類，getText()/prompt/主題都不變）。 */
+   private final PasswordField token = new PasswordField();
    private final TextField localPort = new TextField("25565");
    private final TextField remotePort = new TextField("25565");
    private final TextArea logArea = new TextArea();
@@ -72,6 +72,12 @@ public final class OnlinePage extends VBox implements MclPage {
    private int roomLatencyMs = -1;
    private volatile boolean polling;
    private boolean terracottaLocked;
+   /** 日誌區目前顯示的是哪一次會話、顯示到第幾行（避免兩次運行的日誌串在一起）。 */
+   private long frpSession = -1;
+   private int frpLines;
+   /** 上次讀入 / 寫出的配置；只有輸入框真的改過才寫回，避免覆蓋玩家手改的 frpc.toml / frpc.ini。 */
+   private FrpService.FrpConfig savedFrpConfig;
+   private final Consumer<FrpService.LogLine> frpLogListener = this::onFrpLine;
 
    public OnlinePage(MclContext context) {
       this.context = context;
@@ -104,17 +110,17 @@ public final class OnlinePage extends VBox implements MclPage {
       this.getChildren().set(2, pane);
       if (pane == this.frpPane) {
          this.updatePortStatus();
+         this.syncFrp();
       }
 
    }
 
    public void onShown() {
       this.updatePortStatus();
-      if (this.context.frp().isRunning()) {
-         this.startButton.setDisable(true);
-         this.stopButton.setDisable(false);
-      }
-
+      // 這一頁每次切回來都是「新頁面」（其它頁面離開就釋放）：
+      // 先掛回即時日誌，再把「當前這次會話」的日誌整段還原，兩次運行才不會串在一起。
+      this.context.frp().setLogListener(this.frpLogListener);
+      this.syncFrp();
       this.refreshTerracottaPath();
       this.startPolling();
    }
@@ -123,7 +129,15 @@ public final class OnlinePage extends VBox implements MclPage {
       if (this.tcPoll != null) {
          this.tcPoll.stop();
       }
+      this.context.frp().clearLogListener(this.frpLogListener);
+      this.saveFrpConfig();
+   }
 
+   public void onReleased() {
+      if (this.tcPoll != null) {
+         this.tcPoll.stop();
+      }
+      this.context.frp().clearLogListener(this.frpLogListener);
    }
 
    private VBox buildP2P() {
@@ -220,7 +234,11 @@ public final class OnlinePage extends VBox implements MclPage {
          this.tcPoll.stop();
       }
 
-      this.tcPoll = new Timeline(new KeyFrame[]{new KeyFrame(Duration.seconds((double)1.5F), (e) -> this.pollTerracotta(), new KeyValue[0])});
+      this.tcPoll = new Timeline(new KeyFrame[]{new KeyFrame(Duration.seconds((double)1.5F), (e) -> {
+         // frpc 自己退出（伺服器拒絕/網路中斷）時要把按鈕還原，順便確認日誌沒被換掉
+         this.syncFrp();
+         this.pollTerracotta();
+      }, new KeyValue[0])});
       this.tcPoll.setCycleCount(-1);
       this.tcPoll.play();
       this.pollTerracotta();
@@ -503,6 +521,14 @@ public final class OnlinePage extends VBox implements MclPage {
       this.logArea.setPrefHeight((double)220.0F);
       this.logArea.setStyle("-fx-font-family: Consolas, monospace; -fx-font-size: 12px;");
       VBox.setVgrow(this.logArea, Priority.ALWAYS);
+      // 先把工作目錄建好，玩家才能把服務商給的 frpc.toml / frpc.ini 丟進去
+      try {
+         Files.createDirectories(this.context.frp().workDir());
+      } catch (Exception error) {
+         SafeLog.warn("[frp] 建立工作目錄失敗：" + error.getClass().getSimpleName());
+      }
+      // <data>/online/frp 裡的 frpc.toml / frpc.ini（或任何 *.toml / *.ini）直接填回輸入框
+      this.restoreFrpConfig();
       this.startButton.getStyleClass().add("primary-button");
       this.startButton.setOnAction((e) -> this.startTunnel());
       this.stopButton.setDisable(true);
@@ -528,33 +554,33 @@ public final class OnlinePage extends VBox implements MclPage {
    private void startTunnel() {
       String host = this.server.getText() == null ? "" : this.server.getText().trim();
       if (host.isEmpty()) {
+         // 玩家可能剛把配置丟進資料夾：先重新掃一次，免得還要離開頁面再回來
+         this.restoreFrpConfig();
+         host = this.server.getText() == null ? "" : this.server.getText().trim();
+      }
+      if (host.isEmpty()) {
          MCLDialog.error(this.getScene().getWindow(), I18n.t("online.frp.start"), I18n.t("online.frp.need_server"));
-      } else {
-         int serverPortValue = parseInt(this.serverPort.getText(), 7000);
-         int localPortValue = parseInt(this.localPort.getText(), 25565);
-         int remotePortValue = parseInt(this.remotePort.getText(), localPortValue);
-         FrpService.FrpConfig config = new FrpService.FrpConfig(host, serverPortValue, this.token.getText() == null ? "" : this.token.getText(), localPortValue, remotePortValue);
-
-         try {
-            this.context.frp().start(config, this.context.settings().frpPath(), (line) -> Platform.runLater(() -> this.appendLog(line)));
-            this.startButton.setDisable(true);
-            this.stopButton.setDisable(false);
-            this.appendLog(I18n.t("online.frp.log.started", this.context.frp().pid()));
-            String account = (String)this.context.accounts().current().map((accountRecord) -> accountRecord.name()).orElse("");
-            this.context.onlineState().enter(OnlineState.Phase.IN_ROOM, account);
-         } catch (Exception e) {
-            SafeLog.warn("启动 FRP 失败");
-            MCLDialog.error(this.getScene().getWindow(), I18n.t("online.frp.start"), e.getMessage());
-         }
-
+         return;
+      }
+      FrpService.FrpConfig config = this.currentFrpConfig();
+      try {
+         this.context.frp().start(config, this.context.settings().frpPath());
+         this.savedFrpConfig = config;
+         // 只顯示「這一次」的日誌：syncFrp 會把上一次的整段換掉，不會串在一起
+         this.syncFrp();
+         String account = (String)this.context.accounts().current().map((accountRecord) -> accountRecord.name()).orElse("");
+         this.context.onlineState().enter(OnlineState.Phase.IN_ROOM, account);
+      } catch (Exception e) {
+         SafeLog.warn("启动 FRP 失败：" + e.getClass().getSimpleName());
+         this.syncFrp();
+         MCLDialog.error(this.getScene().getWindow(), I18n.t("online.frp.start"), e.getMessage());
       }
    }
 
    private void stopTunnel() {
+      // 「已停止」由 FrpService 統一回報（檔案與介面同一份內容）
       this.context.frp().stop();
-      this.startButton.setDisable(false);
-      this.stopButton.setDisable(true);
-      this.appendLog(I18n.t("online.frp.log.stopped"));
+      this.syncFrp();
       this.context.onlineState().leave();
    }
 
@@ -565,14 +591,10 @@ public final class OnlinePage extends VBox implements MclPage {
    }
 
    private void openConfig() {
-      String host = this.server.getText() == null ? "" : this.server.getText().trim();
-      int serverPortValue = parseInt(this.serverPort.getText(), 7000);
-      int localPortValue = parseInt(this.localPort.getText(), 25565);
-      int remotePortValue = parseInt(this.remotePort.getText(), localPortValue);
-      FrpService.FrpConfig config = new FrpService.FrpConfig(host, serverPortValue, this.token.getText() == null ? "" : this.token.getText(), localPortValue, remotePortValue);
-
+      FrpService.FrpConfig config = this.currentFrpConfig();
       try {
          Path file = this.context.frp().writeConfig(config);
+         this.savedFrpConfig = config;
          MCLDialog.info(this.getScene().getWindow(), I18n.t("online.frp.open_config"), I18n.t("online.frp.config_saved", file.toString()));
          DesktopActions.openFolder(file.getParent());
       } catch (Exception e) {
@@ -581,10 +603,90 @@ public final class OnlinePage extends VBox implements MclPage {
 
    }
 
-   private void appendLog(String line) {
-      TextArea var10000 = this.logArea;
-      String var10001 = LocalTime.now().format(TIME);
-      var10000.appendText("[" + var10001 + "] " + SafeLog.sanitize(line) + "\n");
+   private FrpService.FrpConfig currentFrpConfig() {
+      int localPortValue = parseInt(this.localPort.getText(), 25565);
+      return new FrpService.FrpConfig(
+            this.server.getText() == null ? "" : this.server.getText().trim(),
+            parseInt(this.serverPort.getText(), 7000),
+            this.token.getText() == null ? "" : this.token.getText(),
+            localPortValue,
+            parseInt(this.remotePort.getText(), localPortValue));
+   }
+
+   /** {@code <data>/online/frp} 裡的配置已存在時直接填回輸入框（不用玩家重打）。 */
+   private void restoreFrpConfig() {
+      this.context.frp().loadSavedConfig().ifPresentOrElse((saved) -> {
+         this.server.setText(saved.serverAddr());
+         this.serverPort.setText(Integer.toString(saved.serverPort()));
+         this.token.setText(saved.token());
+         this.localPort.setText(Integer.toString(saved.localPort()));
+         this.remotePort.setText(Integer.toString(saved.remotePort()));
+         this.savedFrpConfig = saved;
+      }, () -> this.savedFrpConfig = null);
+   }
+
+   /**
+    * 離開頁面時把輸入框寫回 frpc.toml。
+    *
+    * <p>只有「輸入框真的和上次讀入 / 寫出的不同」才寫 —— 玩家手改的 frpc.toml 可能還有
+    * 額外的 {@code [[proxies]]} 或 frpc.ini 格式，不該因為進出頁面就被覆蓋成最小配置。
+    * 伺服器留空也不覆蓋既有配置。
+    */
+   private void saveFrpConfig() {
+      FrpService.FrpConfig current = this.currentFrpConfig();
+      if (current.serverAddr().isBlank() || current.equals(this.savedFrpConfig)) {
+         return;
+      }
+      try {
+         this.context.frp().writeConfig(current);
+         this.savedFrpConfig = current;
+      } catch (Exception error) {
+         SafeLog.warn("[frp] 保存 frpc.toml 失敗：" + error.getClass().getSimpleName());
+      }
+   }
+
+   private void syncFrp() {
+      this.syncFrpLog();
+      this.syncFrpButtons();
+   }
+
+   /** 把日誌換成「當前會話」的內容：會話或行數對不上才整段重畫，平時不干擾即時輸出。 */
+   private void syncFrpLog() {
+      FrpService service = this.context.frp();
+      // 只有「剛進頁面 / 換了會話」才需要從日誌檔補齊；1.5 秒輪詢不重讀大檔
+      FrpService.Snapshot snapshot = service.snapshot(service.currentSessionId() != this.frpSession);
+      if (snapshot.sessionId() == this.frpSession && snapshot.nextIndex() == this.frpLines) {
+         return;
+      }
+      // 記憶體緩衝已截斷、而這個頁面早就顯示過完整前段：不要用半截快照覆蓋（新行由 listener 補）
+      if (snapshot.sessionId() == this.frpSession && snapshot.baseIndex() > 0) {
+         return;
+      }
+      this.frpSession = snapshot.sessionId();
+      this.frpLines = snapshot.nextIndex();
+      this.logArea.setText(snapshot.lines().isEmpty() ? "" : String.join("\n", snapshot.lines()) + "\n");
+      this.logArea.positionCaret(this.logArea.getLength());
+      this.logArea.setScrollTop(Double.MAX_VALUE);
+   }
+
+   private void syncFrpButtons() {
+      boolean running = this.context.frp().isRunning();
+      this.startButton.setDisable(running);
+      this.stopButton.setDisable(!running);
+   }
+
+   /** 即時日誌：只接受「當前會話、且還沒顯示過」的行（重新進頁面時由 syncFrpLog 整段接手）。 */
+   private void onFrpLine(FrpService.LogLine line) {
+      Platform.runLater(() -> {
+         if (line.sessionId() != this.frpSession || line.index() < this.frpLines) {
+            return;
+         }
+
+         this.frpLines = line.index() + 1;
+         this.logArea.appendText(line.text() + "\n");
+         this.logArea.positionCaret(this.logArea.getLength());
+         this.logArea.setScrollTop(Double.MAX_VALUE);
+      });
    }
 
    private static int parseInt(String raw, int fallback) {

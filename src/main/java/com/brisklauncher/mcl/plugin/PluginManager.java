@@ -201,6 +201,9 @@ public final class PluginManager {
             AuthProviderRegistry.unregister(id);
         }
         authProviderIds.clear();
+        // 外掛可能覆蓋了內建 provider 的 id（例如 third_party）；卸載後把內建實作補回來，
+        // 否則停用/刷新一次外掛，該帳號類型就會變成「缺少認證實作」直到重啟。
+        AuthProviderRegistry.resetToBuiltins();
         closeLoaders();
         builtins.clear();
         external.clear();

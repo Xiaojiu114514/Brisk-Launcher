@@ -24,7 +24,7 @@ public final class HelloPlugin implements LauncherPlugin {
 
     @Override
     public String name() {
-        // name() 会在插件载入时与切换语言时被调用，所以这里可以直接用语言包
+        // name() 只在載入時讀取；切換語言後要按「刷新」才會重新呼叫。
         return context == null ? "Hello Plugin" : context.messages().t("hello.name");
     }
 

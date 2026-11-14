@@ -11,6 +11,6 @@ public interface PluginLog {
 
     void warn(String message);
 
-    /** 记录例外（含堆栈）。 */
+    /** 记录例外摘要（类名 + 消息；不会输出完整堆栈）。 */
     void error(String message, Throwable error);
 }

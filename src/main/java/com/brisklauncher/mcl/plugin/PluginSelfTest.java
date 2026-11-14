@@ -27,9 +27,9 @@ import java.util.zip.ZipOutputStream;
  * plugin.json 解析、apiVersion 闸门、classloader 实例化、插件语言包、
  * 插件配置落盘、插件服务登记、认证实现注册/注销。
  *
- * <p>跑法（先 {@code mvn -o compile}）：
+ * <p>跑法（先 {@code gradle installDist}）：
  * <pre>
- *   java -cp "target\classes;build\install\brisk-launcher\lib\*" \
+ *   java -cp "build\classes\java\main;build\install\brisk-launcher\lib\*" \
  *        com.brisklauncher.mcl.plugin.PluginSelfTest examples\hello-plugin\hello-plugin.jar
  * </pre>
  * 结束码 0 = 全过。

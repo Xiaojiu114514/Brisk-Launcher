@@ -5,8 +5,9 @@ import javafx.scene.Node;
 /**
  * 插件贡献的一个导航页（顶栏入口）。
  *
- * <p>页面对象在插件载入时就存在，但 {@link #createContent(PluginContext)} 只在用户第一次
- * 切到这一页时调用一次；页面被丢弃时调用 {@link #onDispose()}。
+ * <p>頁面物件在插件載入時就存在，但 {@link #createContent(PluginContext)} 只在「這次頁面視圖」
+ * 建立時呼叫一次；離開頁面後視圖被丟棄，下次再進入會重新呼叫 {@code createContent}。
+ * 頁面被丟棄時呼叫 {@link #onDispose()}。
  *
  * <p>线程约定：{@code createContent} / {@code onShown} / {@code onHidden} / {@code onDispose}
  * 都在 JavaFX 执行绪上调用。

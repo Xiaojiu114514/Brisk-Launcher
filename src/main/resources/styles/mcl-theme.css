@@ -140,7 +140,7 @@
 
 .window-close:hover {
     -fx-background-color: -brisk-danger;
-    -fx-text-fill: white;
+    -fx-text-fill: -brisk-on-accent;
 }
 
 /* ---------- 页面 ---------- */
@@ -203,7 +203,7 @@
 
 .primary-button {
     -fx-background-color: linear-gradient(to bottom, -brisk-accent-soft, -brisk-accent-strong);
-    -fx-text-fill: white;
+    -fx-text-fill: -brisk-on-accent;
     -fx-font-size: 15px;
     -fx-font-weight: bold;
     -fx-background-radius: 12;
@@ -769,7 +769,7 @@
 }
 
 .config-shell .check-box:selected > .box > .mark {
-    -fx-background-color: white;
+    -fx-background-color: -brisk-on-accent;
 }
 
 /* ---------- 登入彈窗進度條：跟主題一致的暖色 ---------- */

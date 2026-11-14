@@ -21,7 +21,8 @@ import java.util.ServiceLoader;
  *   <li>在 {@code onLoad} 里呼叫 {@link com.brisklauncher.mcl.plugin.api.PluginContext#registerAuthProvider}。</li>
  * </ul>
  * 同一个 {@code id} 后注册的覆盖先注册的；同 {@link AccountType} 取最后注册的那个，
- * 所以插件可以替换内建实现，但不会把内建实现弄丢（{@link #all()} 里还能看到被覆盖前的 id）。
+ * 所以插件可以替换内建实现。注意：被覆盖的内建实作**不会**留在 map 里；插件卸载后由
+ * {@code PluginManager.unloadAll()} 呼叫 {@link #resetToBuiltins()} 重建内建实作。
  *
  * <p>线程安全：所有方法都 synchronized（登入流程在背景线程，插件注册在启动线程）。
  */

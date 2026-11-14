@@ -12,11 +12,11 @@ import java.util.List;
  * 多份 CSS 的順序、背景圖參數、安全檢查（遠端 url / @font-face）、
  * 路徑逃逸防護、選擇回退、以及快取是否真的生效。
  *
- * <p>跑法（先 {@code mvn -o compile}）：
+ * <p>跑法（先 {@code gradle installDist}）：
  * <pre>
- *   java -cp "target\classes;build\install\brisk-launcher\lib\*" \
+ *   java -cp "build\classes\java\main;build\install\brisk-launcher\lib\*" \
  *        -Dmcl.themes.dir=target\theme-selftest\themes \
- *        com.brisklauncher.mcl.setting.ThemeSelfTest
+ *        com.brisklauncher.mcl.setting.ThemePacksSelfTest
  * </pre>
  * 結束碼 0 = 全過。
  */

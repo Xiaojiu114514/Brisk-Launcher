@@ -1,5 +1,6 @@
 package com.brisklauncher.mcl.ui;
 
+import com.brisklauncher.mcl.security.GuardedImages;
 import com.brisklauncher.mcl.security.SafeLog;
 import com.brisklauncher.mcl.setting.ThemePacks;
 import javafx.application.Platform;
@@ -136,9 +137,10 @@ public final class ThemeLogo {
 
     private static Image loadFile(Path path, int request) {
         try {
-            return request > 0
-                    ? new Image(path.toUri().toString(), request, request, true, true, false)
-                    : new Image(path.toUri().toString(), 0, 0, true, true, false);
+            // 主題 logo 是外部檔案：一律走 GuardedImages（ImageGuard 會先擋尺寸炸彈）。
+            // 工作列圖示不需要原圖解析度，統一縮到 256，避免大圖常駐。
+            int size = request > 0 ? request : 256;
+            return GuardedImages.fromFile(path, size, size, true, true);
         } catch (Throwable error) {
             return null;
         }

@@ -8,6 +8,8 @@
 > language pack, config, services. Build it with `build.ps1`, drop the jar in `data\plugins\`, done.
 >
 > API version: **2** (`com.brisklauncher.mcl.plugin.api.PluginApi.VERSION`)
+>
+> Exact signatures, defaults and record fields: [Plugin API reference](PLUGIN_API.md).
 
 ---
 
@@ -22,13 +24,14 @@ A plugin is a plain jar placed in `<launcher>\data\plugins\`. It is loaded at la
 | Tool panel | `LauncherPlugin.createPanel` | One panel per plugin, shown on the **Tools** page |
 | Navigation page | `LauncherPlugin.pages` | As many as you like; each becomes a top-bar entry |
 | Own language pack | `i18n/messages*.properties` in the jar | Read through `PluginContext.messages()` |
-| Auth provider | `META-INF/services/...AuthProvider` or `context.registerAuthProvider` | Can replace a built-in provider per account type |
+| Auth provider | `META-INF/services/...AuthProvider` or `context.registerAuthProvider` | Affects launch/refresh for that account type; the login UI still uses the built-in providers |
 | Own config & storage | `context.config()` / `context.pluginDataDir()` | `data\plugin-data\<id>\`, writable |
 | Services for other plugins | `context.services()` | Voluntary contract; cleared on unload |
 | Launcher services | `context.http()`, `context.log()`, `context.info()`, `context.instances()`… | See §4 |
 
-What it **cannot** do (by design, see §13): add pipeline hooks (download / install / launch), inject CSS,
-replace launcher pages, or reach the launcher's private directory.
+What it **cannot** do by API design (see §13): add dedicated pipeline hooks (download / install / launch),
+replace launcher pages, or get a private-directory getter. This is **not** a sandbox: `ownerWindow()`
+still reaches the Scene, and the module also exports `AppPaths` (see §12).
 
 ### 2. Quick start (5 minutes)
 
@@ -121,22 +124,35 @@ Unknown fields are ignored. The file must be UTF-8 and at the jar **root** (not 
 Everything you may use lives in `com.brisklauncher.mcl.plugin.api` (plus `com.brisklauncher.mcl.auth.api`
 for auth, JDK and JavaFX). Anything else in the launcher is internal and may change without notice.
 
+> Exact signatures, defaults and record fields: **[Plugin API reference](PLUGIN_API.md)**. There is no
+> `permissions` field and no Android-style permission sandbox; an accepted plugin runs with the same
+> user rights as the launcher (see §12).
+
 #### 4.1 `LauncherPlugin`
 
 | Method | Default | When it is called |
 |---|---|---|
 | `String id()` | — (required) | Load time |
-| `String name()` | — (required) | Load time **and** on language switch |
-| `String description()` | `""` | Load time, language switch |
-| `String icon()` | `"🧩"` | Load time, language switch |
+| `String name()` | — (required) | Load time; re-read only when the plugin is reloaded (Refresh) |
+| `String description()` | `""` | Load time |
+| `String icon()` | `"🧩"` | Load time |
 | `String version()` | `""` | Load time (falls back to `plugin.json`) |
 | `void onLoad(PluginContext)` | no-op | Once, right after the instance is created |
 | `List<LauncherPage> pages()` | `List.of()` | Once, at load time |
 | `Node createPanel(PluginContext)` | `null` | Every time the panel is (re)created — FX thread |
-| `void onUnload()` | no-op | Disable / remove / refresh / launcher exit |
+| `void onUnload()` | no-op | Plugin unload only: disable / remove / refresh / launcher exit |
 
 Do not override `createPanel` if your plugin is page-only: the launcher detects it and will not show an
 empty tool entry.
+
+> **Page cleanup is not plugin unload.** Leaving the Tools page (or switching to another page) only
+> discards the panel node; it calls `LauncherPage.onDispose()` for navigation pages, but never
+> `LauncherPlugin.onUnload()`. Treat `onUnload()` as "the jar is going away": stop threads, close files,
+> unregister global listeners there — and do not rely on it for per-view cleanup.
+>
+> **`id()` vs `plugin.json`:** for an external jar the launcher uses the manifest `id` (or the jar file
+> name) for `plugin-data\<id>\` and `context.pluginId()`; `id()` is not called for external jars. Keep
+> the two identical.
 
 #### 4.2 `LauncherPage`
 
@@ -145,7 +161,7 @@ empty tool entry.
 | `String id()` | `[A-Za-z0-9._-]`; becomes `p:<pluginId>:<pageId>` internally |
 | `String title()` | Top-bar label; called on language switch |
 | `String icon()` | Optional emoji prefix |
-| `Node createContent(PluginContext)` | Called once per page instance — FX thread |
+| `Node createContent(PluginContext)` | Called once per page view — FX thread; a revisit builds a new view |
 | `void onShown()` / `onHidden()` | Page became visible / was switched away |
 | `void onDispose()` | Page thrown away (leaving the page, language switch, window close) |
 
@@ -166,17 +182,21 @@ again after you navigate away and back. Put reusable state in fields of the plug
 | | `info(title, msg)`, `error(title, msg)`, `confirm(title, msg, onYes)` | Non-blocking, launcher styling |
 | Instances | `instances()`, `selectedInstanceGameDir()`, `selectedInstanceLabel()` | `InstanceInfo(id, mcVersion, gameDir)` |
 | Theme | `theme()` | `ThemeInfo(id, name, dark, accent, background)` — match the active theme pack |
-
-> **Styling tip**: the launcher stylesheet defines design tokens (`-brisk-bg`, `-brisk-surface`,
-> `-brisk-text`, `-brisk-accent`, …). Use them in your inline styles
-> (`label.setStyle("-fx-text-fill: -brisk-text-muted;")`) and your panel follows every theme
-> automatically. Full list: [theme guide, Appendix A](THEME_DEV.md#15-appendix-a-design-tokens).
 | Messaging | `messages()` | Your `i18n/messages*.properties` |
 | Storage | `config()` | `config.properties`, auto-saved, atomic |
 | Services | `services()` | `provide` / `find` / `require` / `has` |
 | Auth | `registerAuthProvider(AuthProvider)` | Unregistered automatically on unload |
 | Threads | `runLater(Runnable)` | Hop back to the FX thread |
 | | `addLocaleListener(Runnable)` | Returns a `Runnable` that unregisters |
+
+> **Styling tip**: the launcher stylesheet defines design tokens (`-brisk-bg`, `-brisk-surface`,
+> `-brisk-text`, `-brisk-accent`, …). Use them in your inline styles
+> (`label.setStyle("-fx-text-fill: -brisk-text-muted;")`) and your panel follows every theme
+> automatically. Full list: [theme guide, Appendix A](THEME_DEV.md#15-appendix-a-design-tokens).
+>
+> **Instance selection**: `selectedInstanceGameDir()` / `selectedInstanceLabel()` fall back to the
+> first available instance when the user has not explicitly picked one. Do not treat a non-null value
+> as "the user selected this instance"; show the label if the plugin needs to be sure.
 
 #### 4.4 `PluginHttp`
 
@@ -209,6 +229,8 @@ context.log().info("hello");               // launcher log, [plugin:<id>] prefix
 context.log().error("failed", throwable);
 ```
 
+Full method lists and record fields: [Plugin API reference](PLUGIN_API.md).
+
 ### 5. Lifecycle and threading
 
 ```
@@ -216,17 +238,23 @@ launcher start
   └─ scan data\plugins\*.jar            (plugin.json, one SHA-256 per jar)
       └─ dependency order by requires
           └─ disabled.txt / trust check / risk notice
-              └─ new MyPlugin()  →  onLoad(context)      [FX thread, keep it short]
-                  └─ pages()                              [FX thread]
-                      └─ createPanel(context)             [FX thread, on Tools page]
-                          └─ … user interaction …
-                      └─ onUnload()                       [disable/remove/refresh/exit]
+              └─ new MyPlugin()
+                  → onLoad(context)          [startup: background thread; Refresh: FX thread]
+                  → pages()                  [same thread as onLoad]
+                      → createPanel(context) [FX thread, on Tools page]
+                          → … user interaction …
+                  → onUnload()               [plugin unload only: disable/remove/refresh/exit]
 ```
 
-* Everything except `onLoad` may also run on the FX thread — **never block it**. Long work:
-  `new Thread(...)` (or an executor) and `context.runLater(...)` for UI updates.
+* `onLoad()` and `pages()` are **not** guaranteed to run on the FX thread: at startup they run on a
+  background thread, while pressing Refresh calls them on the FX thread. Do not create JavaFX nodes in
+  either — build UI in `createPanel()` / `createContent()`, which are always on the FX thread.
+* Long work (network, disk) belongs on your own thread/executor; use `context.runLater(...)` for UI
+  updates. Never block the FX thread.
 * `dataDir()` is shared: read what you need, but write only to `pluginDataDir()`.
-* `onUnload()` must stop threads and close files; the launcher calls it before unloading your jar.
+* `onUnload()` must stop threads and close files. The launcher calls it once per plugin load, when the
+  plugin is disabled / removed / refreshed / the launcher exits. Leaving a page does **not** call it
+  (that is `LauncherPage.onDispose()` for navigation pages, or just discarding the panel).
 
 ### 6. Files and folders
 
@@ -237,7 +265,7 @@ launcher start
 | `data\plugins\README.txt` | Generated reminder |
 | `data\plugin-data\<id>\` | **Your** writable folder (config, caches, exports) |
 | `%LOCALAPPDATA%\BriskLauncher\` | Launcher-private: accounts, `secret.key`, `acks.json`, `plugin-trust.json` — do not touch |
-| `%LOCALAPPDATA%\BriskLauncher\logs\launcher.log` | Logs (`launcher.log.0` / `.1` are rotations) |
+| `%LOCALAPPDATA%\BriskLauncher\logs\<yyyy-MM-dd-HHmmss>.log` | One log file per launcher start (no rotation); bootstrap output is under `logs\boot\boot-*.log` |
 
 Risk notice: the first third-party plugin load shows a one-time notice (recorded in `acks.json`).
 `plugin-trust.json` remembers the SHA-256 per plugin id, so **updating** a plugin re-asks once
@@ -275,19 +303,31 @@ public void onLoad(PluginContext context) {
 ```
 
 Same `id()` overrides; same `type()` makes your provider the one used for that account type
-(launch / refresh path resolves through the registry). Unloaded → automatically unregistered.
+(launch / refresh path resolves through the registry). Unloaded → automatically unregistered, and the
+built-in providers are restored.
+
+> **Current limitation (important):** the account page's interactive login buttons still use the
+> launcher's built-in Microsoft / offline / Yggdrasil providers. A plugin provider registered here is
+> used by the **launch / refresh** path, not as a new login tab; its `displayName()` / `icon()` are not
+> shown in the account UI. Providers are selected by `type()`, and the last registered one wins — so a
+> `THIRD_PARTY` provider will take over launch/refresh for **all** third-party accounts. There is no
+> per-account provider id yet, so two providers of the same type cannot be mixed reliably.
+>
+> Full auth types and field-level signatures: [Plugin API reference](PLUGIN_API.md).
 
 ### 8. Packaging
 
 ```bat
-rem 1) build the launcher once, so the API jar exists
-mvn -o compile
+rem 1) from the repository root: build the launcher once (with dependency jars)
+set GRADLE_USER_HOME=%CD%\.cache\gradle
+gradle installDist
 
-rem 2) compile the plugin (Java 21; classpath = launcher classes + its lib)
+rem 2) from examples\hello-plugin: compile the plugin (Java 21)
+cd examples\hello-plugin
 set JAVA_HOME=C:\Program Files\Java\jdk-21
 "%JAVA_HOME%\bin\javac" -encoding UTF-8 --release 21 ^
-    -cp "target\classes;build\install\brisk-launcher\lib\*" ^
-    -d out src\com\example\hello\HelloPlugin.java
+    -cp "..\..\build\install\brisk-launcher\lib\*" ^
+    -sourcepath src -d out src\com\example\hello\HelloPlugin.java
 
 rem 3) plugin.json + i18n must be at the jar root
 copy plugin.json out
@@ -296,14 +336,22 @@ xcopy /E /I i18n out\i18n
 "%JAVA_HOME%\bin\jar" --create --file hello-plugin.jar -C out .
 ```
 
+> `mvn -o compile` only produces `target\classes`; it does not put JavaFX/Jackson on the plugin
+> compile classpath. Add those jars from your local Maven repository or use the Gradle `installDist`
+> output above. The sample has three source files; `-sourcepath src` lets `javac` find
+> `HelloPage`/`HelloPanel` when you compile `HelloPlugin.java` (`*.java` is not expanded by cmd on
+> Windows; use `-sourcepath` or an `@argfile`).
+
 Rules that bite if you miss them:
 
 * `plugin.json` **at the jar root** (a copy under `META-INF/` is ignored);
 * main class `public`, **public no-arg constructor**;
 * Java 21 bytecode or older (`--release 21`); newer class files fail with `UnsupportedClassVersionError`;
-* compile against the launcher's classes on the **classpath** — but only `…plugin.api` / `…auth.api` /
-  JavaFX / Jackson / JDK are reachable at runtime. Touching launcher internals compiles fine and then
-  throws `IllegalAccessError` at load time.
+* the supported runtime surface is `…plugin.api` / `…auth.api` plus JavaFX / Jackson / JDK. The
+  launcher module also exports `com.brisklauncher.mcl` and `com.brisklauncher.mcl.i18n` for historical
+  reasons — that includes `AppPaths` and private paths. Treat them as unsupported: they are not part of
+  the compatibility contract and are not a security boundary. Non-exported packages (`…ui`, `…setting`,
+  the plugin implementation) do throw `IllegalAccessError` at runtime.
 * no shading of launcher classes into your jar — the launcher's own loader is the parent.
 
 ### 9. Compatibility contract
@@ -311,8 +359,10 @@ Rules that bite if you miss them:
 * API version: `PluginApi.VERSION` (currently `2`). Adding methods bumps it; removals bump the major.
 * `plugin.json` `"apiVersion"` lets you declare the minimum you need; a newer launcher accepts older
   plugins, an older launcher refuses newer `apiVersion` instead of crashing.
-* Only the `plugin.api` / `auth.api` packages are stable. Everything else (`com.brisklauncher.mcl.*`,
-  internals of `ToolsPage`, …) may change in any release.
+* Only the `plugin.api` / `auth.api` packages are stable. The module also exports
+  `com.brisklauncher.mcl` and `com.brisklauncher.mcl.i18n` for historical reasons; those are
+  **unsupported** (and the root package exposes private paths via `AppPaths`). Everything else may
+  change in any release.
 * Your `config.properties` and files under `plugin-data\<id>\` are yours: migrate them yourself when the
   format changes. Never write to `launcher.json` / `accounts.json` / `secret.key`.
 
@@ -320,7 +370,7 @@ Rules that bite if you miss them:
 
 | Symptom | Cause / fix |
 |---|---|
-| Plugin not in the list | jar not in `data\plugins\`, or `disabled.txt` contains its id/file name/SHA-256 |
+| Plugin not in the list | jar not in `data\plugins\`; a disabled/`plugin.json`-broken plugin is still listed with a ⚠ and the reason |
 | `缺少 plugin.json` | `plugin.json` not at the jar root |
 | `主类没有实现 LauncherPlugin` | Wrong `class`, or still importing the old `.plugin.LauncherPlugin` |
 | `需要更新版本的启动器` | `apiVersion` higher than the launcher's `PluginApi.VERSION` |
@@ -328,8 +378,8 @@ Rules that bite if you miss them:
 | `依赖循环` | Plugins require each other |
 | `插件内容已变更` | You replaced the jar; confirm once, digest is re-pinned |
 | `NoSuchMethodError` / `AbstractMethodError` | Compiled against a newer API than the launcher provides |
-| `IllegalAccessError` | You referenced launcher internals instead of `plugin.api` |
-| `IllegalStateException: Toolkit not initialized` | You touched JavaFX off the FX thread or before the UI exists |
+| `IllegalAccessError` | You referenced a non-exported launcher package (`…ui`, `…setting`, plugin impl). The root/i18n packages are exported but unsupported |
+| `IllegalStateException: Toolkit not initialized` | You touched JavaFX in `onLoad`/`pages()` (startup runs on a background thread) or before the UI exists |
 | Nothing on the Tools page | Plugin only has pages (no `createPanel`) — that is shown as a hint, not an error |
 
 Useful switches:
@@ -342,7 +392,7 @@ java -Dmcl.dev.tool=hello-plugin … rem open this tool automatically on the Too
 Headless contract test (no UI needed):
 
 ```bat
-java -cp "target\classes;build\install\brisk-launcher\lib\*" ^
+java -cp "build\classes\java\main;build\install\brisk-launcher\lib\*" ^
      com.brisklauncher.mcl.plugin.PluginSelfTest examples\hello-plugin\hello-plugin.jar
 ```
 
@@ -361,17 +411,25 @@ Plugins run **in the launcher process** with the same Windows user, so they can 
 network and read account data that is already in memory. There is no sandbox:
 
 * the launcher only refuses to load what `disabled.txt` says, pins SHA-256 per id, and warns once;
-* the plugin API deliberately does not hand out the private directory (accounts, `secret.key`, logs);
+* `PluginContext` does not expose the private directory, but this is **not** a security boundary: the
+  module also exports the root package (including `AppPaths`, which can resolve accounts, `secret.key`
+  and logs) for historical reasons. Treat every plugin as able to reach those paths.
+* there is **no permission manifest** and no capability sandbox. The only gate is whether the plugin
+  is loaded at all (disabled list, SHA-256 trust, risk notice). Once loaded, it has the same
+  user-level access as the launcher; do not expect Android-style per-capability prompts.
 * never log tokens, passwords, cookies or player personal data;
-* an auth provider you register is used for real logins — treat it like a password field.
+* an auth provider you register affects the real launch/refresh path (and can break accounts of that
+  type) — treat it like a password field.
 
 ### 13. Limits (on purpose)
 
 * One tool panel per plugin, and it lives inside the Tools page.
-* No hooks into download / install / launch pipelines, no context menus, no custom top-bar widgets,
-  no CSS injection (themes are for `data\themes\`).
+* No dedicated hooks into download / install / launch pipelines, no context menus, no custom top-bar
+  widgets. There is no CSS-injection API, but `ownerWindow()` returns a JavaFX `Window`, so a plugin can
+  still reach `getScene().getStylesheets()` — again, no sandbox (themes are for `data\themes\`).
 * Language and theme packs are **declarative files**, not code — they cannot localise your plugin.
-* Plugins cannot be hot-reloaded per-plugin: Refresh reloads everything.
+* Plugins cannot be hot-reloaded per-plugin: Refresh reloads every plugin and rebuilds the launcher's
+  toolbar/navigation pages.
 
 ---
 
@@ -386,13 +444,14 @@ network and read account data that is already in memory. There is no sandbox:
 | 工具面板 | `LauncherPlugin.createPanel` | 每个插件一个面板，显示在「工具」页 |
 | 导航页 | `LauncherPlugin.pages` | 数量不限，每个都会变成顶栏入口 |
 | 自带语言包 | jar 里的 `i18n/messages*.properties` | 通过 `PluginContext.messages()` 读取 |
-| 认证实现 | `META-INF/services/...AuthProvider` 或 `context.registerAuthProvider` | 可以按账号类型替换内建实现 |
+| 认证实现 | `META-INF/services/...AuthProvider` 或 `context.registerAuthProvider` | 影响该账号类型的启动/刷新；登入 UI 仍用内建实作 |
 | 自己的配置与存储 | `context.config()` / `context.pluginDataDir()` | `data\plugin-data\<id>\`，可写 |
 | 给别的插件用的服务 | `context.services()` | 自愿契约，卸载时自动清掉 |
 | 启动器能力 | `context.http()`、`context.log()`、`context.info()`、`context.instances()`…… | 见 §4 |
 
-**做不到**的（有意为之，见 §13）：挂进下载 / 安装 / 启动流程、注入 CSS、替换启动器页面、
-访问启动器私有目录。
+**做不到**的（API 设计上，见 §13）：挂进下载 / 安装 / 启动流程的专用 hook、替换启动器页面、
+取得私有目录的 getter。这不是沙箱：`ownerWindow()` 仍能拿到 Scene，module 也还 export 了
+`AppPaths`（见 §12）。
 
 ### 2. 五分钟上手
 
@@ -485,21 +544,31 @@ public final class HelloPlugin implements LauncherPlugin {
 能用的东西都在 `com.brisklauncher.mcl.plugin.api`（做认证再加 `com.brisklauncher.mcl.auth.api`），
 外加 JDK 与 JavaFX。启动器其它包都是内部实现，不保证兼容。
 
+> 完整的签名、默认值与 record 字段见 **[Plugin API 参考](PLUGIN_API.md#简体中文)**。没有 `permissions`
+> 字段，也没有 Android 式的权限沙箱；外挂一旦被接受，就与启动器拥有相同的使用者权限（见 §12）。
+
 #### 4.1 `LauncherPlugin`
 
 | 方法 | 默认值 | 调用时机 |
 |---|---|---|
 | `String id()` | —（必需） | 载入时 |
-| `String name()` | —（必需） | 载入时 **和** 切换语言时 |
-| `String description()` | `""` | 载入、切换语言 |
-| `String icon()` | `"🧩"` | 载入、切换语言 |
+| `String name()` | —（必需） | 载入时；重新「刷新」外挂时才会再读一次 |
+| `String description()` | `""` | 载入时 |
+| `String icon()` | `"🧩"` | 载入时 |
 | `String version()` | `""` | 载入时（回退到 `plugin.json`） |
 | `void onLoad(PluginContext)` | 空 | 实例建立后一次 |
 | `List<LauncherPage> pages()` | `List.of()` | 载入时一次 |
 | `Node createPanel(PluginContext)` | `null` | 面板每次重建时（FX 线程） |
-| `void onUnload()` | 空 | 停用 / 移除 / 刷新 / 启动器退出 |
+| `void onUnload()` | 空 | 只在外挂卸载时：停用 / 移除 / 刷新 / 启动器退出 |
 
 只提供导航页的插件**不要**覆写 `createPanel`：启动器会检测到，不会给你留一个空工具条目。
+
+> **页面回收 ≠ 外挂卸载。** 离开「工具」页或切到别的页面只会丢掉面板节点；导航页会收到
+> `LauncherPage.onDispose()`，但**不会**收到 `LauncherPlugin.onUnload()`。把 `onUnload()` 当成
+> 「jar 要没了」：在这里停线程、关文件、注销全局监听；不要用它做单次页面的清理。
+>
+> **`id()` 与 `plugin.json`：** 外部 jar 的 `plugin-data\<id>\` 与 `context.pluginId()` 用的是
+> `plugin.json` 的 `id`（没写就用 jar 档名）；外部 jar 不会调用 `id()`。两个值请保持一致。
 
 #### 4.2 `LauncherPage`
 
@@ -508,7 +577,7 @@ public final class HelloPlugin implements LauncherPlugin {
 | `String id()` | `[A-Za-z0-9._-]`；内部 key 是 `p:<插件id>:<页面id>` |
 | `String title()` | 顶栏文字；切换语言时会重新调用 |
 | `String icon()` | 可选 emoji 前缀 |
-| `Node createContent(PluginContext)` | 每个页面实例调用一次（FX 线程） |
+| `Node createContent(PluginContext)` | 每次页面视图建立时调用一次（FX 线程）；离开再回来会建新视图 |
 | `void onShown()` / `onHidden()` | 页面显示 / 被切走 |
 | `void onDispose()` | 页面被丢弃（离开页面、切语言、关窗） |
 
@@ -529,17 +598,20 @@ public final class HelloPlugin implements LauncherPlugin {
 | | `info(title, msg)`、`error(title, msg)`、`confirm(title, msg, onYes)` | 非阻塞，统一风格 |
 | 实例 | `instances()`、`selectedInstanceGameDir()`、`selectedInstanceLabel()` | `InstanceInfo(id, mcVersion, gameDir)` |
 | 主题 | `theme()` | `ThemeInfo(id, name, dark, accent, background)` —— 跟着当前主题配色 |
-
-> **配色建议**：启动器样式里定义了一套设计变量（`-brisk-bg`、`-brisk-surface`、`-brisk-text`、
-> `-brisk-accent` …）。在自己写的 inline 样式里用它们
-> （`label.setStyle("-fx-text-fill: -brisk-text-muted;")`），面板就会自动跟着主题走。
-> 清单见[主题开发指南附录 A](THEME_DEV.md#15-appendix-a-design-tokens)。
 | 多语言 | `messages()` | 你的 `i18n/messages*.properties` |
 | 存储 | `config()` | `config.properties`，写入即落盘（原子替换） |
 | 服务 | `services()` | `provide` / `find` / `require` / `has` |
 | 认证 | `registerAuthProvider(AuthProvider)` | 卸载时自动注销 |
 | 线程 | `runLater(Runnable)` | 回到 FX 线程 |
 | | `addLocaleListener(Runnable)` | 回传的 `Runnable` 用来取消注册 |
+
+> **配色建议**：启动器样式里定义了一套设计变量（`-brisk-bg`、`-brisk-surface`、`-brisk-text`、
+> `-brisk-accent` …）。在自己写的 inline 样式里用它们
+> （`label.setStyle("-fx-text-fill: -brisk-text-muted;")`），面板就会自动跟着主题走。
+> 清单见[主题开发指南附录 A](THEME_DEV.md#15-appendix-a-design-tokens)。
+>
+> **实例选择**：使用者没有明确选过实例时，`selectedInstanceGameDir()` / `selectedInstanceLabel()`
+> 会回退到第一个可用实例，所以可能是非 null / 非空字串。需要确定「真的选了」时请自己看 label。
 
 #### 4.4 `PluginHttp`
 
@@ -572,6 +644,8 @@ context.log().info("hello");               // 写进启动器日志，带 [plugi
 context.log().error("failed", throwable);
 ```
 
+完整的方法清单与 record 字段见 **[Plugin API 参考](PLUGIN_API.md#简体中文)**。
+
 ### 5. 生命周期与线程
 
 ```
@@ -579,17 +653,20 @@ context.log().error("failed", throwable);
   └─ 扫描 data\plugins\*.jar           （plugin.json，每支 jar 一次 SHA-256）
       └─ 按 requires 排序
           └─ disabled.txt / 信任检查 / 风险提示
-              └─ new MyPlugin()  →  onLoad(context)      [FX 线程，要快]
-                  └─ pages()                              [FX 线程]
-                      └─ createPanel(context)             [FX 线程，点开工具时]
-                          └─ … 使用者操作 …
-                      └─ onUnload()                       [停用/移除/刷新/退出]
+              └─ new MyPlugin()
+                  → onLoad(context)          [启动：背景线程；刷新：FX 线程]
+                  → pages()                  [与 onLoad 同一线程]
+                      → createPanel(context) [FX 线程，点开工具时]
+                          → … 使用者操作 …
+                  → onUnload()               [只在外挂卸载时：停用/移除/刷新/退出]
 ```
 
-* 除 `onLoad` 外的回调也在 FX 线程上，**绝对不要阻塞**。长活儿自己开线程，
-  更新界面用 `context.runLater(...)`。
+* `onLoad()` / `pages()` **不保证在 FX 线程**：启动时在背景线程，按「刷新」时在 FX 线程。
+  这两处不要建立 JavaFX 节点；界面只在 `createPanel()` / `createContent()` 里建（一定在 FX）。
+* 长活儿自己开线程；更新界面用 `context.runLater(...)`。**绝对不要阻塞 FX 线程。**
 * `dataDir()` 是共用的：读没问题，写请只写 `pluginDataDir()`。
-* `onUnload()` 必须停掉线程、关掉文件；启动器在卸下你的 jar 之前会调用它。
+* `onUnload()` 必须停掉线程、关掉文件；启动器每次外挂载入只调用一次，时机是停用 / 移除 /
+  刷新 / 启动器退出。**离开页面不会调用它**（导航页只会收到 `LauncherPage.onDispose()`）。
 
 ### 6. 文件位置
 
@@ -600,7 +677,7 @@ context.log().error("failed", throwable);
 | `data\plugins\README.txt` | 自动生成的说明 |
 | `data\plugin-data\<id>\` | **你的**可写目录（配置、缓存、导出） |
 | `%LOCALAPPDATA%\BriskLauncher\` | 启动器私有：账号、`secret.key`、`acks.json`、`plugin-trust.json`，不要动 |
-| `%LOCALAPPDATA%\BriskLauncher\logs\launcher.log` | 日志（`launcher.log.0` / `.1` 是轮替） |
+| `%LOCALAPPDATA%\BriskLauncher\logs\<yyyy-MM-dd-HHmmss>.log` | 每次启动一个日志档（不轮替）；引导器输出在 `logs\boot\boot-*.log` |
 
 风险提示：首次载入第三方插件会弹一次说明（记在 `acks.json`）。
 `plugin-trust.json` 按插件 id 记住 SHA-256，所以**更新**插件时会再问一次「内容已变更」——
@@ -638,19 +715,29 @@ public void onLoad(PluginContext context) {
 ```
 
 同 `id()` 会互相覆盖；同 `type()` 的实现在该账号类型的登入 / 刷新路径里生效。
-插件卸载时自动注销，不会留下悬空实现。
+插件卸载时自动注销，不会留下悬空实现；内建实作也会在卸载后补回。
+
+> **目前的限制（重要）**：账号页的交互式登入仍使用启动器内建的微软 / 离线 / Yggdrasil 实作；
+> 这里注册的外挂实作只影响**启动 / 刷新**路径，不会变成新的登入分页，`displayName()` / `icon()`
+> 也不会显示在账号 UI。实作按 `type()` 选取、后注册的赢，所以一个 `THIRD_PARTY` 实作会接管
+> **所有**第三方账号的启动/刷新；目前没有「每个账号记 provider id」的机制，同类型的两个实作
+> 不能可靠地混用。
+>
+> 完整的认证类型与字段签名见 **[Plugin API 参考](PLUGIN_API.md#简体中文)**。
 
 ### 8. 打包
 
 ```bat
-rem 1) 先把启动器编译一次，API jar 才存在
-mvn -o compile
+rem 1) 在仓库根目录：先把启动器编译成目录版（带依赖 jar）
+set GRADLE_USER_HOME=%CD%\.cache\gradle
+gradle installDist
 
-rem 2) 编译插件（Java 21）
+rem 2) 在 examples\hello-plugin 下编译插件（Java 21）
+cd examples\hello-plugin
 set JAVA_HOME=C:\Program Files\Java\jdk-21
 "%JAVA_HOME%\bin\javac" -encoding UTF-8 --release 21 ^
-    -cp "target\classes;build\install\brisk-launcher\lib\*" ^
-    -d out src\com\example\hello\HelloPlugin.java
+    -cp "..\..\build\install\brisk-launcher\lib\*" ^
+    -sourcepath src -d out src\com\example\hello\HelloPlugin.java
 
 rem 3) plugin.json 与 i18n 必须在 jar 根目录
 copy plugin.json out
@@ -661,11 +748,18 @@ xcopy /E /I i18n out\i18n
 
 最容易踩的几条：
 
+> `mvn -o compile` 只会产出 `target\classes`，不会把 JavaFX / Jackson 放进插件的编译 classpath。
+> 请用上面的 `gradle installDist` 输出，或自己从本机 Maven 仓库补上依赖 jar。范例有三个源文件，
+> 用 `-sourcepath src` 让 javac 找到 `HelloPage` / `HelloPanel`（Windows 的 cmd 不会展开 `*.java`；
+> 请用 `-sourcepath` 或 `@argfile`），不要只编 `HelloPlugin.java` 又不给 sourcepath。
+
 * `plugin.json` 必须在 **jar 根目录**（放 `META-INF/` 下无效）；
 * 主类 `public` 且**有 public 无参构造器**；
 * Java 21 或更旧的字节码（`--release 21`）；更新的类文件会 `UnsupportedClassVersionError`；
-* 用 **classpath** 编译没问题，但运行时只有 `…plugin.api` / `…auth.api` / JavaFX / Jackson / JDK
-  可达。引用启动器内部类能编过，载入时会 `IllegalAccessError`；
+* 稳定/支持的运行时范围只有 `…plugin.api` / `…auth.api` + JavaFX / Jackson / JDK。启动器
+  module 也历史性地 export 了 `com.brisklauncher.mcl` 与 `com.brisklauncher.mcl.i18n`
+  （前者包含 `AppPaths` 与私有路径）；这些不在兼容承诺内，也不是安全边界。只有非 export 的
+  `…ui` / `…setting` / plugin 实作会 `IllegalAccessError`；
 * 不要把启动器类 shade 进你的 jar —— 父载入器就是启动器自己。
 
 ### 9. 兼容性约定
@@ -673,8 +767,9 @@ xcopy /E /I i18n out\i18n
 * API 版本：`PluginApi.VERSION`（目前 `2`）。加方法升次版本，删方法升主版本。
 * `plugin.json` 的 `"apiVersion"` 用来声明你需要的最低版本；新启动器接受旧插件，
   旧启动器遇到更高的 `apiVersion` 会明确拒绝而不是崩掉。
-* 只有 `plugin.api` / `auth.api` 两个包是稳定的；其它（`com.brisklauncher.mcl.*`、`ToolsPage` 内部等）
-  任何版本都可能改。
+* 只有 `plugin.api` / `auth.api` 两个包是稳定的；`com.brisklauncher.mcl` 与
+  `com.brisklauncher.mcl.i18n` 虽然也被 export，但属于历史遗留、不保证兼容（root 包还能拿到
+  `AppPaths` 的私有路径）。
 * `config.properties` 与 `plugin-data\<id>\` 里的文件是你自己的：格式变了请自己迁移。
   永远不要写 `launcher.json` / `accounts.json` / `secret.key`。
 
@@ -682,7 +777,7 @@ xcopy /E /I i18n out\i18n
 
 | 现象 | 原因 / 处理 |
 |---|---|
-| 列表里没有插件 | jar 不在 `data\plugins\`，或 `disabled.txt` 里有它的 id / 文件名 / SHA-256 |
+| 列表里没有插件 | jar 不在 `data\plugins\`；被停用或 `plugin.json` 坏掉的外挂仍会以 ⚠ 失败项目显示并带原因 |
 | `缺少 plugin.json` | `plugin.json` 不在 jar 根目录 |
 | `主类没有实现 LauncherPlugin` | `class` 写错，或还在 import 旧的 `.plugin.LauncherPlugin` |
 | `需要更新版本的启动器` | `apiVersion` 比启动器的 `PluginApi.VERSION` 高 |
@@ -690,8 +785,8 @@ xcopy /E /I i18n out\i18n
 | `依赖循环` | 插件互相依赖 |
 | `插件内容已变更` | 你换了 jar；确认一次即可，摘要会重新钉住 |
 | `NoSuchMethodError` / `AbstractMethodError` | 用了比启动器更新的 API |
-| `IllegalAccessError` | 引用了启动器内部类，应该只用 `plugin.api` |
-| `IllegalStateException: Toolkit not initialized` | 在非 FX 线程或界面存在前碰了 JavaFX |
+| `IllegalAccessError` | 引用了非 export 的启动器套件（`…ui`、`…setting`、plugin 实作）；root/i18n 虽可进但不受支持 |
+| `IllegalStateException: Toolkit not initialized` | 在 `onLoad` / `pages()` 碰了 JavaFX（启动时是背景线程），或界面存在前碰了 JavaFX |
 | 工具页什么都没有 | 插件只有导航页（没覆写 `createPanel`），会显示提示而不是报错 |
 
 调试开关：
@@ -704,7 +799,7 @@ java -Dmcl.dev.tool=hello-plugin … rem 工具页自动打开这个插件
 无界面的契约自检（不需要开启动器）：
 
 ```bat
-java -cp "target\classes;build\install\brisk-launcher\lib\*" ^
+java -cp "build\classes\java\main;build\install\brisk-launcher\lib\*" ^
      com.brisklauncher.mcl.plugin.PluginSelfTest examples\hello-plugin\hello-plugin.jar
 ```
 
@@ -722,17 +817,23 @@ java -cp "target\classes;build\install\brisk-launcher\lib\*" ^
 读到已经载入内存的账号数据。没有沙箱：
 
 * 启动器只做三件事：按 `disabled.txt` 拒绝、按 id 钉住 SHA-256、第一次弹风险说明；
-* 插件 API 有意不把私有目录（账号、`secret.key`、日志）交出去；
+* `PluginContext` 本身不把私有目录交出去，但**这不是安全边界**：module 也历史性地 export 了
+  `com.brisklauncher.mcl`（内含 `AppPaths`，可解析账号 / `secret.key` / 日志路径）。
+  请把所有外挂当成「能碰到这些路径」来对待；
+* **没有**权限声明清单，也没有能力沙箱；唯一的闸门是「这个外挂要不要载入」（disabled 名单、
+  SHA-256 信任记录、风险说明）。一旦载入，它就和启动器拥有相同的使用者权限；不要期待 Android
+  式的逐项权限询问。
 * 不要记录令牌、密码、Cookie 或玩家个资；
-* 你注册的认证实现会用于真实登入，请当成密码框来对待。
+* 你注册的认证实现会影响真实的启动/刷新路径（可能弄坏该类型的所有账号），请当成密码框来对待。
 
 ### 13. 有意为之的限制
 
 * 每个插件只有一个工具面板，而且只能出现在「工具」页里。
-* 不能挂进下载 / 安装 / 启动流程，不能加右键菜单或顶栏自订控件，不能注入 CSS
-  （主题是 `data\themes\` 的事）。
+* 没有专用的下载 / 安装 / 启动流程 hook，不能加右键菜单或顶栏自订控件。没有 CSS 注入 API，
+  但 `ownerWindow()` 会回传 JavaFX `Window`，外挂仍可拿到 `getScene().getStylesheets()` ——
+  同样地，这不是沙箱（主题是 `data\themes\` 的事）。
 * 语言包与主题包是**声明式文件**，不是代码，不能用来本地化你的插件。
-* 插件不能单独热重载：「刷新」会重载全部插件。
+* 插件不能单独热重载：「刷新」会重载全部插件并重建顶栏/导航页。
 
 ---
 
@@ -747,13 +848,14 @@ java -cp "target\classes;build\install\brisk-launcher\lib\*" ^
 | 工具面板 | `LauncherPlugin.createPanel` | 每個外掛一個面板，顯示在「工具」頁 |
 | 導覽頁 | `LauncherPlugin.pages` | 數量不限，每個都會變成頂欄入口 |
 | 自帶語言包 | jar 裡的 `i18n/messages*.properties` | 透過 `PluginContext.messages()` 讀取 |
-| 認證實作 | `META-INF/services/...AuthProvider` 或 `context.registerAuthProvider` | 可以按帳號類型替換內建實作 |
+| 認證實作 | `META-INF/services/...AuthProvider` 或 `context.registerAuthProvider` | 影響該帳號型別的啟動/重新整理；登入 UI 仍用內建實作 |
 | 自己的設定與儲存 | `context.config()` / `context.pluginDataDir()` | `data\plugin-data\<id>\`，可寫 |
 | 給別的插件用的服務 | `context.services()` | 自願契約，卸載時自動清掉 |
 | 啟動器能力 | `context.http()`、`context.log()`、`context.info()`、`context.instances()`…… | 見 §4 |
 
-**做不到**的（刻意如此，見 §13）：掛進下載 / 安裝 / 啟動流程、注入 CSS、替換啟動器頁面、
-存取啟動器私有資料夾。
+**做不到**的（API 設計上，見 §13）：掛進下載 / 安裝 / 啟動流程的專用 hook、替換啟動器頁面、
+取得私有資料夾的 getter。這不是沙箱：`ownerWindow()` 仍能拿到 Scene，module 也還 export 了
+`AppPaths`（見 §12）。
 
 ### 2. 五分鐘上手
 
@@ -846,21 +948,31 @@ public final class HelloPlugin implements LauncherPlugin {
 能用的東西都在 `com.brisklauncher.mcl.plugin.api`（做認證再加 `com.brisklauncher.mcl.auth.api`），
 外加 JDK 與 JavaFX。啟動器其它套件都是內部實作，不保證相容。
 
+> 完整的簽名、預設值與 record 欄位見 **[Plugin API 參考](PLUGIN_API.md#繁體中文)**。沒有 `permissions`
+> 欄位，也沒有 Android 式的權限沙箱；外掛一旦被接受，就與啟動器擁有相同的使用者權限（見 §12）。
+
 #### 4.1 `LauncherPlugin`
 
 | 方法 | 預設值 | 呼叫時機 |
 |---|---|---|
 | `String id()` | —（必需） | 載入時 |
-| `String name()` | —（必需） | 載入時 **和** 切換語言時 |
-| `String description()` | `""` | 載入、切換語言 |
-| `String icon()` | `"🧩"` | 載入、切換語言 |
+| `String name()` | —（必需） | 載入時；重新「整理」外掛時才會再讀一次 |
+| `String description()` | `""` | 載入時 |
+| `String icon()` | `"🧩"` | 載入時 |
 | `String version()` | `""` | 載入時（回退到 `plugin.json`） |
 | `void onLoad(PluginContext)` | 空 | 實例建立後一次 |
 | `List<LauncherPage> pages()` | `List.of()` | 載入時一次 |
 | `Node createPanel(PluginContext)` | `null` | 面板每次重建時（FX 執行緒） |
-| `void onUnload()` | 空 | 停用 / 移除 / 重新整理 / 啟動器結束 |
+| `void onUnload()` | 空 | 只在外掛卸載時：停用 / 移除 / 重新整理 / 啟動器結束 |
 
 只提供導覽頁的外掛**不要**覆寫 `createPanel`：啟動器會偵測到，不會留一個空的工具項目。
+
+> **頁面回收 ≠ 外掛卸載。** 離開「工具」頁或切到別的頁面只會丟掉面板節點；導覽頁會收到
+> `LauncherPage.onDispose()`，但**不會**收到 `LauncherPlugin.onUnload()`。把 `onUnload()` 當成
+> 「jar 要沒了」：在這裡停執行緒、關檔案、註銷全域監聽；不要用它做單次頁面的清理。
+>
+> **`id()` 與 `plugin.json`：** 外部 jar 的 `plugin-data\<id>\` 與 `context.pluginId()` 用的是
+> `plugin.json` 的 `id`（沒填就用 jar 檔名）；外部 jar 不會呼叫 `id()`。兩個值請保持一致。
 
 #### 4.2 `LauncherPage`
 
@@ -869,7 +981,7 @@ public final class HelloPlugin implements LauncherPlugin {
 | `String id()` | `[A-Za-z0-9._-]`；內部 key 是 `p:<外掛id>:<頁面id>` |
 | `String title()` | 頂欄文字；切換語言時會重新呼叫 |
 | `String icon()` | 可選 emoji 前綴 |
-| `Node createContent(PluginContext)` | 每個頁面實例呼叫一次（FX 執行緒） |
+| `Node createContent(PluginContext)` | 每次頁面視圖建立時呼叫一次（FX 執行緒）；離開再回來會建新視圖 |
 | `void onShown()` / `onHidden()` | 頁面顯示 / 被切走 |
 | `void onDispose()` | 頁面被丟棄（離開頁面、切語言、關窗） |
 
@@ -890,17 +1002,20 @@ public final class HelloPlugin implements LauncherPlugin {
 | | `info(title, msg)`、`error(title, msg)`、`confirm(title, msg, onYes)` | 非阻塞，統一樣式 |
 | 實例 | `instances()`、`selectedInstanceGameDir()`、`selectedInstanceLabel()` | `InstanceInfo(id, mcVersion, gameDir)` |
 | 主題 | `theme()` | `ThemeInfo(id, name, dark, accent, background)` —— 跟著目前主題配色 |
-
-> **配色建議**：啟動器樣式裡定義了一套設計變數（`-brisk-bg`、`-brisk-surface`、`-brisk-text`、
-> `-brisk-accent` …）。在自己寫的 inline 樣式裡用它們
-> （`label.setStyle("-fx-text-fill: -brisk-text-muted;")`），面板就會自動跟著主題走。
-> 清單見[主題開發指南附錄 A](THEME_DEV.md#15-appendix-a-design-tokens)。
 | 多語言 | `messages()` | 你的 `i18n/messages*.properties` |
 | 儲存 | `config()` | `config.properties`，寫入即落盤（原子替換） |
 | 服務 | `services()` | `provide` / `find` / `require` / `has` |
 | 認證 | `registerAuthProvider(AuthProvider)` | 卸載時自動註銷 |
 | 執行緒 | `runLater(Runnable)` | 回到 FX 執行緒 |
 | | `addLocaleListener(Runnable)` | 回傳的 `Runnable` 用來取消註冊 |
+
+> **配色建議**：啟動器樣式裡定義了一套設計變數（`-brisk-bg`、`-brisk-surface`、`-brisk-text`、
+> `-brisk-accent` …）。在自己寫的 inline 樣式裡用它們
+> （`label.setStyle("-fx-text-fill: -brisk-text-muted;")`），面板就會自動跟著主題走。
+> 清單見[主題開發指南附錄 A](THEME_DEV.md#15-appendix-a-design-tokens)。
+>
+> **實例選擇**：使用者沒有明確選過實例時，`selectedInstanceGameDir()` / `selectedInstanceLabel()`
+> 會退回第一個可用實例，所以可能是非 null / 非空字串。需要確定「真的選了」時請自己看 label。
 
 #### 4.4 `PluginHttp`
 
@@ -933,6 +1048,8 @@ context.log().info("hello");               // 寫進啟動器日誌，帶 [plugi
 context.log().error("failed", throwable);
 ```
 
+完整的方法清單與 record 欄位見 **[Plugin API 參考](PLUGIN_API.md#繁體中文)**。
+
 ### 5. 生命週期與執行緒
 
 ```
@@ -940,17 +1057,20 @@ context.log().error("failed", throwable);
   └─ 掃描 data\plugins\*.jar           （plugin.json，每支 jar 一次 SHA-256）
       └─ 依 requires 排序
           └─ disabled.txt / 信任檢查 / 風險提示
-              └─ new MyPlugin()  →  onLoad(context)      [FX 執行緒，要快]
-                  └─ pages()                              [FX 執行緒]
-                      └─ createPanel(context)             [FX 執行緒，點開工具時]
-                          └─ … 使用者操作 …
-                      └─ onUnload()                       [停用/移除/重新整理/結束]
+              └─ new MyPlugin()
+                  → onLoad(context)          [啟動：背景執行緒；重新整理：FX 執行緒]
+                  → pages()                  [與 onLoad 同一執行緒]
+                      → createPanel(context) [FX 執行緒，點開工具時]
+                          → … 使用者操作 …
+                  → onUnload()               [只在外掛卸載時：停用/移除/重新整理/結束]
 ```
 
-* 除 `onLoad` 外的回呼也在 FX 執行緒上，**絕對不要阻塞**。長工作自己開執行緒，
-  更新介面用 `context.runLater(...)`。
+* `onLoad()` / `pages()` **不保證在 FX 執行緒**：啟動時在背景執行緒，按「重新整理」時在 FX。
+  這兩處不要建立 JavaFX 節點；介面只在 `createPanel()` / `createContent()` 裡建（一定在 FX）。
+* 長工作自己開執行緒；更新介面用 `context.runLater(...)`。**絕對不要阻塞 FX 執行緒。**
 * `dataDir()` 是共用的：讀沒問題，寫請只寫 `pluginDataDir()`。
-* `onUnload()` 必須停掉執行緒、關掉檔案；啟動器在卸下你的 jar 之前會呼叫它。
+* `onUnload()` 必須停掉執行緒、關掉檔案；啟動器每次外掛載入只呼叫一次，時機是停用 / 移除 /
+  重新整理 / 啟動器結束。**離開頁面不會呼叫它**（導覽頁只會收到 `LauncherPage.onDispose()`）。
 
 ### 6. 檔案位置
 
@@ -961,7 +1081,7 @@ context.log().error("failed", throwable);
 | `data\plugins\README.txt` | 自動產生的說明 |
 | `data\plugin-data\<id>\` | **你的**可寫資料夾（設定、快取、匯出） |
 | `%LOCALAPPDATA%\BriskLauncher\` | 啟動器私有：帳號、`secret.key`、`acks.json`、`plugin-trust.json`，不要動 |
-| `%LOCALAPPDATA%\BriskLauncher\logs\launcher.log` | 日誌（`launcher.log.0` / `.1` 是輪替） |
+| `%LOCALAPPDATA%\BriskLauncher\logs\<yyyy-MM-dd-HHmmss>.log` | 每次啟動一個日誌檔（不輪替）；引導器輸出在 `logs\boot\boot-*.log` |
 
 風險提示：首次載入第三方外掛會彈一次說明（記在 `acks.json`）。
 `plugin-trust.json` 依外掛 id 記住 SHA-256，所以**更新**外掛時會再問一次「內容已變更」——
@@ -999,19 +1119,29 @@ public void onLoad(PluginContext context) {
 ```
 
 同 `id()` 會互相覆蓋；同 `type()` 的實作在該帳號類型的登入 / 重新整理路徑裡生效。
-外掛卸載時自動註銷，不會留下懸空實作。
+外掛卸載時自動註銷，不會留下懸空實作；內建實作也會在卸載後補回。
+
+> **目前的限制（重要）**：帳號頁的互動式登入仍使用啟動器內建的微軟 / 離線 / Yggdrasil 實作；
+> 這裡註冊的外掛實作只影響**啟動 / 重新整理**路徑，不會變成新的登入分頁，`displayName()` /
+> `icon()` 也不會顯示在帳號 UI。實作按 `type()` 選取、後註冊的贏，所以一個 `THIRD_PARTY` 實作
+> 會接管**所有**第三方帳號的啟動/重新整理；目前沒有「每個帳號記 provider id」的機制，同型別的
+> 兩個實作不能可靠地混用。
+>
+> 完整的認證型別與欄位簽名見 **[Plugin API 參考](PLUGIN_API.md#繁體中文)**。
 
 ### 8. 打包
 
 ```bat
-rem 1) 先把啟動器編譯一次，API jar 才存在
-mvn -o compile
+rem 1) 在倉庫根目錄：先把啟動器編譯成目錄版（帶依賴 jar）
+set GRADLE_USER_HOME=%CD%\.cache\gradle
+gradle installDist
 
-rem 2) 編譯外掛（Java 21）
+rem 2) 在 examples\hello-plugin 下編譯外掛（Java 21）
+cd examples\hello-plugin
 set JAVA_HOME=C:\Program Files\Java\jdk-21
 "%JAVA_HOME%\bin\javac" -encoding UTF-8 --release 21 ^
-    -cp "target\classes;build\install\brisk-launcher\lib\*" ^
-    -d out src\com\example\hello\HelloPlugin.java
+    -cp "..\..\build\install\brisk-launcher\lib\*" ^
+    -sourcepath src -d out src\com\example\hello\HelloPlugin.java
 
 rem 3) plugin.json 與 i18n 必須在 jar 根目錄
 copy plugin.json out
@@ -1022,11 +1152,18 @@ xcopy /E /I i18n out\i18n
 
 最容易踩的幾條：
 
+> `mvn -o compile` 只會產出 `target\classes`，不會把 JavaFX / Jackson 放進外掛的編譯 classpath。
+> 請用上面的 `gradle installDist` 輸出，或自己從本機 Maven 倉庫補上依賴 jar。範例有三個原始檔，
+> 用 `-sourcepath src` 讓 javac 找到 `HelloPage` / `HelloPanel`（Windows 的 cmd 不會展開 `*.java`；
+> 請用 `-sourcepath` 或 `@argfile`），不要只編 `HelloPlugin.java` 又不給 sourcepath。
+
 * `plugin.json` 必須在 **jar 根目錄**（放 `META-INF/` 底下無效）；
 * 主類 `public` 且**有 public 無參建構子**；
 * Java 21 或更舊的位元組碼（`--release 21`）；更新的類別檔案會 `UnsupportedClassVersionError`；
-* 用 **classpath** 編譯沒問題，但執行時只有 `…plugin.api` / `…auth.api` / JavaFX / Jackson / JDK
-  可達。引用啟動器內部類別編得過，載入時會 `IllegalAccessError`；
+* 穩定/支援的執行時範圍只有 `…plugin.api` / `…auth.api` + JavaFX / Jackson / JDK。啟動器
+  module 也歷史性地 export 了 `com.brisklauncher.mcl` 與 `com.brisklauncher.mcl.i18n`
+  （前者包含 `AppPaths` 與私有路徑）；這些不在相容承諾內，也不是安全邊界。只有非 export 的
+  `…ui` / `…setting` / plugin 實作會 `IllegalAccessError`；
 * 不要把啟動器類別 shade 進你的 jar —— 父載入器就是啟動器自己。
 
 ### 9. 相容性約定
@@ -1034,8 +1171,9 @@ xcopy /E /I i18n out\i18n
 * API 版本：`PluginApi.VERSION`（目前 `2`）。加方法升次版本，刪方法升主版本。
 * `plugin.json` 的 `"apiVersion"` 用來宣告你需要的最低版本；新啟動器接受舊外掛，
   舊啟動器遇到更高的 `apiVersion` 會明確拒絕而不是崩掉。
-* 只有 `plugin.api` / `auth.api` 兩個套件是穩定的；其它（`com.brisklauncher.mcl.*`、`ToolsPage` 內部等）
-  任何版本都可能改。
+* 只有 `plugin.api` / `auth.api` 兩個套件是穩定的；`com.brisklauncher.mcl` 與
+  `com.brisklauncher.mcl.i18n` 雖然也被 export，但屬於歷史遺留、不保證相容（root 套件還能拿到
+  `AppPaths` 的私有路徑）。
 * `config.properties` 與 `plugin-data\<id>\` 裡的檔案是你自己的：格式變了請自己遷移。
   永遠不要寫 `launcher.json` / `accounts.json` / `secret.key`。
 
@@ -1043,7 +1181,7 @@ xcopy /E /I i18n out\i18n
 
 | 現象 | 原因 / 處理 |
 |---|---|
-| 清單裡沒有外掛 | jar 不在 `data\plugins\`，或 `disabled.txt` 裡有它的 id / 檔名 / SHA-256 |
+| 清單裡沒有外掛 | jar 不在 `data\plugins\`；被停用或 `plugin.json` 壞掉的外掛仍會以 ⚠ 失敗項目顯示並帶原因 |
 | `缺少 plugin.json` | `plugin.json` 不在 jar 根目錄 |
 | `主类没有实现 LauncherPlugin` | `class` 寫錯，或還在 import 舊的 `.plugin.LauncherPlugin` |
 | `需要更新版本的启动器` | `apiVersion` 比啟動器的 `PluginApi.VERSION` 高 |
@@ -1051,8 +1189,8 @@ xcopy /E /I i18n out\i18n
 | `依赖循环` | 外掛互相依賴 |
 | `插件内容已变更` | 你換了 jar；確認一次即可，摘要會重新釘住 |
 | `NoSuchMethodError` / `AbstractMethodError` | 用了比啟動器更新的 API |
-| `IllegalAccessError` | 引用了啟動器內部類別，應該只用 `plugin.api` |
-| `IllegalStateException: Toolkit not initialized` | 在非 FX 執行緒或介面存在前碰了 JavaFX |
+| `IllegalAccessError` | 引用了非 export 的啟動器套件（`…ui`、`…setting`、plugin 實作）；root/i18n 雖可進但不受支援 |
+| `IllegalStateException: Toolkit not initialized` | 在 `onLoad` / `pages()` 碰了 JavaFX（啟動時是背景執行緒），或介面存在前碰了 JavaFX |
 | 工具頁什麼都沒有 | 外掛只有導覽頁（沒覆寫 `createPanel`），會顯示提示而不是報錯 |
 
 除錯開關：
@@ -1065,7 +1203,7 @@ java -Dmcl.dev.tool=hello-plugin … rem 工具頁自動開啟這個外掛
 無介面的契約自檢（不需要開啟動器）：
 
 ```bat
-java -cp "target\classes;build\install\brisk-launcher\lib\*" ^
+java -cp "build\classes\java\main;build\install\brisk-launcher\lib\*" ^
      com.brisklauncher.mcl.plugin.PluginSelfTest examples\hello-plugin\hello-plugin.jar
 ```
 
@@ -1083,17 +1221,23 @@ java -cp "target\classes;build\install\brisk-launcher\lib\*" ^
 讀到已經載入記憶體的帳號資料。沒有沙箱：
 
 * 啟動器只做三件事：依 `disabled.txt` 拒絕、依 id 釘住 SHA-256、第一次彈風險說明；
-* 外掛 API 刻意不把私有資料夾（帳號、`secret.key`、日誌）交出去；
+* `PluginContext` 本身不把私有資料夾交出去，但**這不是安全邊界**：module 也歷史性地 export 了
+  `com.brisklauncher.mcl`（內含 `AppPaths`，可解析帳號 / `secret.key` / 日誌路徑）。
+  請把所有外掛當成「能碰到這些路徑」來對待；
+* **沒有**權限宣告清單，也沒有能力沙箱；唯一的閘門是「這個外掛要不要載入」（disabled 名單、
+  SHA-256 信任記錄、風險說明）。一旦載入，它就與啟動器擁有相同的使用者權限；不要期待 Android
+  式的逐項權限詢問。
 * 不要記錄權杖、密碼、Cookie 或玩家個資；
-* 你註冊的認證實作會用於真實登入，請當成密碼欄看待。
+* 你註冊的認證實作會影響真實的啟動/重新整理路徑（可能弄壞該型別的所有帳號），請當成密碼欄看待。
 
 ### 13. 刻意為之的限制
 
 * 每個外掛只有一個工具面板，而且只能出現在「工具」頁裡。
-* 不能掛進下載 / 安裝 / 啟動流程，不能加右鍵選單或頂欄自訂控件，不能注入 CSS
-  （主題是 `data\themes\` 的事）。
+* 沒有專用的下載 / 安裝 / 啟動流程 hook，不能加右鍵選單或頂欄自訂控件。沒有 CSS 注入 API，
+  但 `ownerWindow()` 會回傳 JavaFX `Window`，外掛仍可拿到 `getScene().getStylesheets()` ——
+  同樣地，這不是沙箱（主題是 `data\themes\` 的事）。
 * 語言包與主題包是**宣告式檔案**，不是程式碼，不能用來本地化你的外掛。
-* 外掛不能單獨熱重載：「重新整理」會重載全部外掛。
+* 外掛不能單獨熱重載：「重新整理」會重載全部外掛並重建頂欄/導覽頁。
 
 ---
 

@@ -3,6 +3,7 @@ package com.brisklauncher.mcl.setting;
 import com.brisklauncher.mcl.AppPaths;
 import com.brisklauncher.mcl.i18n.I18n;
 import com.brisklauncher.mcl.net.Http;
+import com.brisklauncher.mcl.security.ImageGuard;
 import com.brisklauncher.mcl.security.SafeLog;
 import com.brisklauncher.mcl.ui.ThemeCssGuard;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -490,6 +491,12 @@ public final class ThemePacks {
             return themes;
         }
         for (Path themeDir : dirs) {
+            // default 是內建主題保留 id：資料夾若叫 default，內建那份永遠會贏。
+            // 與其列兩個同 id 的項目讓使用者選不到，不如直接忽略並留一條 log。
+            if (DEFAULT_ID.equals(themeDir.getFileName().toString())) {
+                SafeLog.warn("[theme] 忽略保留 id 的資料夾：" + themeDir);
+                continue;
+            }
             Theme theme = read(themeDir);
             if (theme != null) {
                 themes.add(theme);
@@ -588,7 +595,7 @@ public final class ThemePacks {
         }
         Path background = resolveBackground(themeDir, declaredBackground, warnings);
         Path preview = resolvePreview(themeDir, declaredPreview);
-        Path logo = resolveLogo(themeDir, declaredLogo);
+        Path logo = resolveLogo(themeDir, declaredLogo, warnings);
         String fit = declaredFit == null || declaredFit.isBlank() ? "cover" : declaredFit.trim()
                 .toLowerCase(Locale.ROOT);
         if (!List.of("cover", "contain", "repeat", "center").contains(fit)) {
@@ -607,18 +614,33 @@ public final class ThemePacks {
      *
      * <p>找不到就回 null，介面會回退到啟動器內建的櫻花方塊（不顯示破圖）。
      */
-    private static Path resolveLogo(Path themeDir, String declared) {
+    private static Path resolveLogo(Path themeDir, String declared, List<String> warnings) {
+        Path found = null;
         if (declared != null && !declared.isBlank()) {
             Path path = safeResolve(themeDir, declared);
-            return path != null && Files.isRegularFile(path) ? path : null;
-        }
-        for (String extension : IMAGE_EXTENSIONS) {
-            Path path = themeDir.resolve("logo." + extension);
-            if (Files.isRegularFile(path)) {
-                return path;
+            if (path != null && Files.isRegularFile(path)) {
+                found = path;
+            } else {
+                warnings.add("logo 指定的档案不存在或不合法：" + declared);
+            }
+        } else {
+            for (String extension : IMAGE_EXTENSIONS) {
+                Path path = themeDir.resolve("logo." + extension);
+                if (Files.isRegularFile(path)) {
+                    found = path;
+                    break;
+                }
             }
         }
-        return null;
+        if (found == null) {
+            return null;
+        }
+        if (!ImageGuard.acceptable(found)) {
+            warnings.add("logo 尺寸或格式不安全（单边 > 8192 或 > 3300 万像素）："
+                    + found.getFileName());
+            return null;
+        }
+        return found;
     }
 
     /** 資料夾裡有沒有任何 .css（用來區分「壞掉的主題」與「不相關的資料夾」）。 */
@@ -699,15 +721,28 @@ public final class ThemePacks {
                 warnings.add("background 指定了不存在的档案：" + declared);
                 return null;
             }
-            return tooLarge(path, warnings) ? null : path;
+            return acceptBackground(path, warnings) ? path : null;
         }
         for (String extension : IMAGE_EXTENSIONS) {
             Path path = themeDir.resolve("background." + extension);
-            if (Files.isRegularFile(path)) {
-                return tooLarge(path, warnings) ? null : path;
+            if (Files.isRegularFile(path) && acceptBackground(path, warnings)) {
+                return path;
             }
         }
         return null;
+    }
+
+    /** 背景圖同時受 16 MB 與 ImageGuard（寬高/像素）限制，避免 16 MB 壓縮圖解碼成 GB 級。 */
+    private static boolean acceptBackground(Path path, List<String> warnings) {
+        if (tooLarge(path, warnings)) {
+            return false;
+        }
+        if (!ImageGuard.acceptable(path)) {
+            warnings.add("背景图尺寸或格式不安全（单边 > 8192 或 > 3300 万像素）："
+                    + path.getFileName());
+            return false;
+        }
+        return true;
     }
 
     private static boolean tooLarge(Path path, List<String> warnings) {

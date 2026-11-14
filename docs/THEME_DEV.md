@@ -5,7 +5,8 @@
 [← Back to README](../README.md) · [Plugin development guide](PLUGIN_DEV.md)
 
 > Bundled themes: `data/themes/night`, `data/themes/sakura`, `data/themes/contrast`
-> (created on first launch — edit them freely, they are not overwritten).
+> (created on first launch). Launcher updates may refresh a **bundled** copy when the bundled theme
+> version changes, so copy it to a new id before making edits you want to keep.
 > Copy-ready sample: [`examples/my-theme/`](../examples/my-theme/)
 >
 > Three moving parts: `theme.css` (+ optional extra CSS), `theme.json` (metadata & options),
@@ -59,7 +60,8 @@ override, `sakura` a light one, `contrast` thick borders and high-contrast text.
 
 ```
 data/themes/my-theme/
-  theme.css            required (main stylesheet)
+  theme.css            required for a styled theme (main stylesheet); a folder with only
+                       theme.json / pack.properties is kept as metadata-only with a warning
   extra.css            optional (any number of *.css)
   theme.json           optional: metadata + options (recommended)
   pack.properties      optional legacy: name / author / version
@@ -99,20 +101,30 @@ avoid spaces. `default` is reserved for the built-in theme.
 |---|---|---|---|
 | `name` | string **or** `{locale: string}` | folder name | Shown in the theme dropdown. A locale map is looked up with the current UI language, then `zh_CN`, then `en_US`, then the first entry. |
 | `description` | string or map | `""` | Shown under the dropdown (Settings → Appearance). |
-| `author` / `version` | string | `""` | Appended to the dropdown label and shown as metadata. |
+| `author` / `version` | string | `""` | Shown in the theme dropdown label (`name (author) · vversion · id` for custom themes) and as metadata. |
 | `homepage` | string | `""` | Informational only. |
 | `base` | `light` / `dark` | `light` | A hint: adds 🌙/☀️ in Settings, exposed to plugins via `context.theme().dark()`, and gives a default `backgroundDim` of 0.25 when you don't set one. |
 | `accent` | `#RRGGBB` | `""` | Your theme's signature colour; exposed to plugins so their panels can match. |
-| `styles` | array of file names | all `*.css` | Applied in this exact order. Without it: `theme.css` first, then the rest alphabetically. Paths must stay inside the theme folder. |
+| `styles` | array of file names | all `*.css` | Applied in this exact order by the main window. Without it: `theme.css` first, then the rest alphabetically. Paths must stay inside the theme folder. |
 | `background` | file name | auto-detect `background.*` | Background image. |
 | `backgroundFit` | `cover` / `contain` / `repeat` / `center` | `cover` | How the image fills the window. |
 | `backgroundDim` | number 0–1 | `base == dark ? 0.25 : 0` | Darkens the image so foreground text stays readable. |
 | `logo` | file name | auto-detect `logo.*` | **Brand mark** shown at the left of the top bar (≈30 px) and used as the window / taskbar icon, so it follows the theme. Square PNG, 128–256 px recommended; transparent background; must stay readable when scaled down to ~26 px (avoid thin lines and text). No logo → the launcher falls back to its built-in sakura-pink cube. |
 | `preview` | file name | auto-detect `preview.*` | Thumbnail in Settings (scaled to 132×74). |
 | `wordmark` | boolean | `true` | Show the big **Brisk** wordmark next to the logo. The small "Brisk Launcher" label beside it is always shown — this only hides the large text. |
+| `bundled` | boolean | `false` | Launcher-owned marker. Do not set it for a third-party theme; if `true` (or the author is `Brisk Launcher`), a launcher update may refresh the theme when the bundled version changes. |
 
 `pack.properties` (legacy) is still read for `name=` / `author=` / `version=` when `theme.json` is
 absent — it cannot express `styles` or background options.
+
+> **`styles` vs. the startup animation.** The main window honors `styles` exactly. The startup
+> animation and the native splash colour scan are lightweight by design: they apply **every** `*.css`
+> in the folder (`theme.css` first, then alphabetical) and do not parse `theme.json`, so a file you
+> leave out of `styles` can still affect the splash colours.
+>
+> **Copying a bundled theme.** `bundled: true` (or author `Brisk Launcher`) marks a theme as
+> launcher-owned; a later launcher update may overwrite its `theme.json` / `theme.css` when the bundled
+> version changes. Remove that marker and change the author if you want your edits to survive.
 
 ### 5. How your CSS is applied
 
@@ -143,9 +155,12 @@ overrides) still works and is the escape hatch for radii, borders, spacing and o
 
 ### 6. Background image
 
-* Formats: PNG / JPG / JPEG / WEBP, **max 16 MB**.
-* Fixed to the window, content area stays on top and keeps its own background — so cards and lists
-  remain readable (a fully transparent content background is not supported).
+* Formats: PNG / JPG / JPEG / WEBP, **max 16 MB**, and the decoded image must pass `ImageGuard`
+  (single side ≤ 8192, ≤ 33 million pixels). A background that fails this is dropped with a warning.
+* Fixed to the window. When a background is present the launcher makes the page/content layer
+  transparent so the image shows through; cards, lists and inputs keep their own surface background,
+  which is what keeps text readable. In other words: the **page** becomes an image backdrop, the
+  **cards** stay opaque.
 * The launcher rounds all four corners and optionally dims the image (`backgroundDim`).
 * Big photos: 1920×1080 is plenty; a 4K PNG mostly costs startup time.
 
@@ -164,6 +179,10 @@ Themes are files downloaded from the internet, so the launcher refuses the risky
 * contains `@font-face`;
 * is bigger than 2 MB;
 * is named outside the theme folder (`"styles": ["../x.css"]`).
+
+Background and logo images are also checked before decoding: the file must be ≤ 16 MB (background) and
+must pass `ImageGuard` (single side ≤ 8192, ≤ 33 million pixels). A too-large/unreadable image is
+dropped with a warning, so a 16 MB compressed PNG cannot expand into a multi-GB decode at startup.
 
 Your theme stays in the list with a warning instead of silently doing nothing — check
 **Settings → Appearance** when a theme looks unstyled.
@@ -214,9 +233,9 @@ That lets a plugin panel pick readable colours instead of hardcoding white-on-wh
 
 | Symptom | Cause / fix |
 |---|---|
-| Theme not in the dropdown | folder is not under `data/themes/`, has neither a `*.css` nor `theme.json`/`pack.properties`, or uses the reserved id `default` |
+| Theme not in the dropdown | folder is not under `data/themes/`, has neither a `*.css` nor `theme.json`/`pack.properties`, or uses the reserved id `default` (ignored on purpose) |
 | Theme listed but nothing changes | CSS rejected by the safety rules → warning shown in Settings; also check `theme.json` syntax (a broken JSON only costs you the metadata, not the CSS) |
-| Background image invisible | content area is opaque; only the window behind it shows the image. Check `background` file name / extension |
+| Background image invisible | the page background is made transparent only when a background is accepted; check the file name / extension, the 16 MB limit and `ImageGuard` (side ≤ 8192, ≤ 33M pixels) |
 | Text unreadable on dark theme | set `-brisk-text*` tokens; also check `-brisk-on-accent` (text on accent-filled buttons) |
 | Controls still mint after switching theme | the theme overrides selectors instead of the `-brisk-*` tokens — override tokens (Appendix A) |
 | Button text invisible on a dark theme | `-brisk-on-accent` must contrast with `-brisk-accent`/`-brisk-accent-strong` |
@@ -227,9 +246,11 @@ That lets a plugin panel pick readable colours instead of hardcoding white-on-wh
 
 ### 15. Appendix A: design tokens
 
-These 40 tokens are defined once in `mcl-theme.css` (`.root`) and used by **every** launcher widget.
-Override the ones you care about inside your own `.root { … }` and the change propagates to the main
-window, all dialogs and the native JavaFX controls. Names are stable within API major version 2.
+These 40 tokens are defined once in `mcl-theme.css` (`.root`). Most are used by the bundled widgets;
+`-brisk-ok` and `-brisk-warning` are reserved and are currently not referenced by the bundled
+stylesheet, so setting them has no visible effect yet. Override the ones you care about inside your own
+`.root { … }` and the change propagates to the main window, all dialogs and the native JavaFX controls.
+Names are stable within the current major release; theme packs do not have an `apiVersion` field yet.
 
 | Token | Default | Typical use |
 |---|---|---|
@@ -266,8 +287,8 @@ window, all dialogs and the native JavaFX controls. Names are stable within API 
 | `-brisk-warn-bg` | `#FFF0DE` | warning / tag background |
 | `-brisk-warn-glass` | `rgba(255,227,196,0.6)` | warning glass |
 | `-brisk-danger` | `#C0392B` | errors |
-| `-brisk-ok` | `#2E8B62` | success |
-| `-brisk-warning` | `#C96A1B` | warnings |
+| `-brisk-ok` | `#2E8B62` | reserved (currently unused by bundled styles) |
+| `-brisk-warning` | `#C96A1B` | reserved (currently unused by bundled styles) |
 | `-brisk-shadow` | `rgba(20,69,63,0.12)` | card shadow |
 | `-brisk-shadow-strong` | `rgba(20,69,63,0.18)` | stronger shadow |
 | `-brisk-accent-shadow` | `rgba(18,191,168,0.22)` | accent glow |
@@ -286,15 +307,16 @@ without you writing a single selector for them.
 (`label.setStyle("-fx-text-fill: -brisk-text-muted;")`), so a plugin panel matches whatever theme is
 active. See the [plugin guide](PLUGIN_DEV.md).
 
-**Guard.** The repository ships `.work/tools/theme_guard.py`: it fails if the base stylesheet contains
-a colour literal outside the token block, if a token is used but not defined, or if Java code
-re-introduces a hardcoded `-fx-…: #hex` style.
+**Maintainer guard.** The maintainers check the base stylesheet with an external script (not shipped
+with the launcher): it fails if a colour literal appears outside the token block, if a token is used but
+not defined, or if Java code re-introduces a hardcoded `-fx-…: #hex` style. These are maintenance
+invariants, not something a theme needs to run.
 
 ### 16. Appendix B: CSS selector inventory
 
-These are the selectors the bundled stylesheet actually defines (149, alphabetically). Override any of
-them; the launcher's own style classes (`mcl-backdrop`, `mcl-backdrop-dim`, `app-root`) are managed by
-code — expect them to move around.
+These are the selectors the bundled stylesheet actually defines (149 comma-grouped entries, 169
+individual selectors, alphabetically). Override any of them; the launcher's own style classes
+(`mcl-backdrop`, `mcl-backdrop-dim`, `app-root`) are managed by code — expect them to move around.
 
 ```
 
@@ -424,7 +446,7 @@ adjust.
 
 ```
 data/themes/my-theme/
-  theme.css            必需（主样式）
+  theme.css            必需（有样式的主题；只有 theme.json / pack.properties 会以警告留在清单）
   extra.css            可选（可以有很多份 *.css）
   theme.json           可选：元数据与选项（建议写）
   pack.properties      可选（旧格式）：name / author / version
@@ -458,20 +480,29 @@ data/themes/my-theme/
 |---|---|---|---|
 | `name` | 字串或 `{语言: 字串}` | 资料夹名 | 下拉选单显示的名字；多语言物件会先找当前界面语言，再 `zh_CN`、`en_US`、最后一个。 |
 | `description` | 字串或物件 | `""` | 显示在下拉选单下面。 |
-| `author` / `version` | 字串 | `""` | 附在下拉名字后面并作为元数据显示。 |
+| `author` / `version` | 字串 | `""` | 显示在下拉标签（自订主题会显示 `名称（作者）· v版本 · id`）和元数据里。 |
 | `homepage` | 字串 | `""` | 仅作说明。 |
 | `base` | `light` / `dark` | `light` | 只是一个提示：设置页会显示 🌙/☀️，外挂可经 `context.theme().dark()` 读取；没写 `backgroundDim` 时深色预设 0.25。 |
 | `accent` | `#RRGGBB` | `""` | 主题主色，开放给外挂配色用。 |
-| `styles` | 档案名阵列 | 全部 `*.css` | 照这个顺序叠加；不写就是 `theme.css` 第一、其余按档名。路径不能跳出主题资料夹。 |
+| `styles` | 档案名阵列 | 全部 `*.css` | 主窗口照这个顺序叠加；不写就是 `theme.css` 第一、其余按档名。路径不能跳出主题资料夹。 |
 | `background` | 档案名 | 自动找 `background.*` | 背景图。 |
 | `backgroundFit` | `cover` / `contain` / `repeat` / `center` | `cover` | 背景怎么铺。 |
 | `backgroundDim` | 0–1 数字 | `base == dark ? 0.25 : 0` | 背景压暗，保证文字可读。 |
 | `logo` | 档案名 | 自动找 `logo.*` | **品牌图**：显示在顶栏左侧（约 30px），同时作为窗口/任务栏图标跟着主题走。建议正方形 PNG、128–256px、透明底，缩到 26px 仍要看得清（别画细线和文字）。没有就回退到内建的樱花粉方块。 |
 | `preview` | 档案名 | 自动找 `preview.*` | 设置页缩图（缩到 132×74）。 |
 | `wordmark` | 布尔 | `true` | 顶栏是否显示「Brisk」大字。旁边的小字「Brisk Launcher」一律保留，这项只管大字。 |
+| `bundled` | 布尔 | `false` | 启动器自用标记。第三方主题不要设置；若为 `true`（或作者是 `Brisk Launcher`），启动器更新且内建版本改变时可能会刷新这个主题。 |
 
 `pack.properties`（旧格式）仍然读 `name=` / `author=` / `version=`，但它表达不了 `styles`
 与背景选项。
+
+> **`styles` 与启动动画。** 主窗口会照 `styles` 精确套用；启动动画与原生 splash 的取色为了启动速度，
+> 只扫资料夹里所有 `*.css`（`theme.css` 优先、其余按档名），不解析 `theme.json`。所以被你在
+> `styles` 里排除的档案，仍可能影响启动画布的颜色。
+>
+> **复制内建主题。** `bundled: true`（或作者是 `Brisk Launcher`）代表这是启动器自己的主题；之后
+> 启动器更新且内建版本改变时，可能会覆盖它的 `theme.json` / `theme.css`。想保留修改请拿掉这个标记
+> 并改作者。
 
 ### 5. CSS 是怎么套上去的
 
@@ -500,8 +531,10 @@ data/themes/my-theme/
 
 ### 6. 背景图
 
-* 格式 PNG / JPG / JPEG / WEBP，**上限 16 MB**。
-* 固定在窗口最底层，内容区仍保留自己的底色（所以卡片和列表不会糊在图上）。
+* 格式 PNG / JPG / JPEG / WEBP，**上限 16 MB**，且解码前必须通过 `ImageGuard`
+  （单边 ≤ 8192、总像素 ≤ 3300 万）；不通过会被丢弃并显示警告。
+* 固定在窗口；有背景图时启动器会把页面/内容层设为透明，让图透出来；卡片、列表、输入框仍保留
+  自己的底色，所以文字可读。换句话说：**页面**变成图的背景，**卡片**维持不透明。
 * 四角圆角、压暗都由启动器处理（`backgroundDim`）。
 * 大图建议 1920×1080 以内；4K PNG 主要是在拖慢启动。
 
@@ -518,6 +551,9 @@ data/themes/my-theme/
 * 含 `@font-face`；
 * 单档超过 2 MB；
 * `styles` 里的路径跳出主题资料夹（例如 `"../x.css"`）。
+
+背景图与 logo 也会在解码前检查：背景 ≤ 16 MB，且必须通过 `ImageGuard`（单边 ≤ 8192、
+总像素 ≤ 3300 万）。过大或解不出来的图会被丢弃并显示警告，避免 16 MB 压缩图在启动时展开成 GB 级。
 
 被拒绝时主题**仍会留在清单里并显示警告**，不会静悄悄失效 —— 主题看起来没生效时先看
 **设置 → 外观**。
@@ -567,9 +603,9 @@ theme.name();        // 当前语言的名字
 
 | 现象 | 原因 / 处理 |
 |---|---|
-| 下拉里没有这个主题 | 不在 `data/themes/` 下、资料夹里既没有 `*.css` 也没有 `theme.json`/`pack.properties`、或占用了 `default` |
+| 下拉里没有这个主题 | 不在 `data/themes/` 下、资料夹里既没有 `*.css` 也没有 `theme.json`/`pack.properties`、或占用了 `default`（会被刻意忽略） |
 | 有列出但界面没变 | CSS 被安全检查拒绝（设置页有警告）；也检查 `theme.json` 是否 JSON 写坏（写坏只丢元数据，不影响 CSS） |
-| 背景图不显示 | 内容区是不透明的，只有窗口底层能看到图；检查 `background` 指定的档名与副档名 |
+| 背景图不显示 | 只有通过检查的背景才会让页面层变透明；检查档名/副档名、16 MB 上限与 `ImageGuard`（单边 ≤ 8192、≤ 3300 万像素） |
 | 深色主题字看不清 | 改 `-brisk-text*` 系列；也检查 `-brisk-on-accent`（强调色按钮上的文字） |
 | 切换主题后控件还是薄荷绿 | 这个主题在覆盖选择器而不是 `-brisk-*` 变量 —— 改成覆盖变量（附录 A） |
 | 深色主题按钮上的字看不见 | `-brisk-on-accent` 要和 `-brisk-accent` / `-brisk-accent-strong` 形成对比 |
@@ -581,7 +617,7 @@ theme.name();        // 当前语言的名字
 ### 15. 附录 A / B
 
 - **设计变量清单（40 个，推荐从这里开始）**：英文段 **§15 Appendix A**。
-- **CSS 选择器清单（149 个，需要细调时用）**：英文段 **§16 Appendix B**。
+- **CSS 选择器清单（149 条列项 / 169 个 selector，需要细调时用）**：英文段 **§16 Appendix B**。
 - 选择器原始规则在 `src/main/resources/styles/mcl-theme.css`，可以直接对照。
 
 ---
@@ -629,11 +665,12 @@ theme.name();        // 当前语言的名字
 
 ```
 data/themes/my-theme/
-  theme.css            必需（主樣式）
+  theme.css            必需（有樣式的主題；只有 theme.json / pack.properties 會以警告留在清單）
   extra.css            可選（可以有很多份 *.css）
   theme.json           可選：中介資料與選項（建議寫）
   pack.properties      可選（舊格式）：name / author / version
   background.png       可選背景圖（png / jpg / jpeg / webp）
+  logo.png             可選品牌圖（頂欄 + 視窗/工作列圖示）
   preview.png          可選縮圖，顯示在設定頁
 ```
 
@@ -662,20 +699,29 @@ data/themes/my-theme/
 |---|---|---|---|
 | `name` | 字串或 `{語言: 字串}` | 資料夾名 | 下拉選單顯示的名字；多語言物件會先找目前介面語言，再 `zh_CN`、`en_US`、最後一個。 |
 | `description` | 字串或物件 | `""` | 顯示在下拉選單下面。 |
-| `author` / `version` | 字串 | `""` | 附在下拉名字後面並作為中介資料顯示。 |
+| `author` / `version` | 字串 | `""` | 顯示在下拉標籤（自訂主題會顯示 `名稱（作者）· v版本 · id`）和中介資料裡。 |
 | `homepage` | 字串 | `""` | 僅作說明。 |
 | `base` | `light` / `dark` | `light` | 只是一個提示：設定頁會顯示 🌙/☀️，外掛可經 `context.theme().dark()` 讀取；沒寫 `backgroundDim` 時深色預設 0.25。 |
 | `accent` | `#RRGGBB` | `""` | 主題主色，開放給外掛配色用。 |
-| `styles` | 檔名陣列 | 全部 `*.css` | 照這個順序疊加；不寫就是 `theme.css` 第一、其餘按檔名。路徑不能跳出主題資料夾。 |
+| `styles` | 檔名陣列 | 全部 `*.css` | 主視窗照這個順序疊加；不寫就是 `theme.css` 第一、其餘按檔名。路徑不能跳出主題資料夾。 |
 | `background` | 檔名 | 自動找 `background.*` | 背景圖。 |
 | `backgroundFit` | `cover` / `contain` / `repeat` / `center` | `cover` | 背景怎麼鋪。 |
 | `backgroundDim` | 0–1 數字 | `base == dark ? 0.25 : 0` | 背景壓暗，保證文字可讀。 |
 | `logo` | 檔名 | 自動找 `logo.*` | **品牌圖**：顯示在頂欄左側（約 30px），同時作為視窗/工作列圖示跟著主題走。建議正方形 PNG、128–256px、透明底，縮到 26px 仍要看得清（別畫細線和文字）。沒有就回退到內建的櫻花粉方塊。 |
 | `preview` | 檔名 | 自動找 `preview.*` | 設定頁縮圖（縮到 132×74）。 |
 | `wordmark` | 布林 | `true` | 頂欄是否顯示「Brisk」大字。旁邊的小字「Brisk Launcher」一律保留，這項只管大字。 |
+| `bundled` | 布林 | `false` | 啟動器自用標記。第三方主題不要設定；若為 `true`（或作者是 `Brisk Launcher`），啟動器更新且內建版本改變時可能會刷新這個主題。 |
 
 `pack.properties`（舊格式）仍然讀 `name=` / `author=` / `version=`，但它表達不了 `styles`
 與背景選項。
+
+> **`styles` 與啟動動畫。** 主視窗會照 `styles` 精確套用；啟動動畫與原生 splash 的取色為了啟動速度，
+> 只掃資料夾裡所有 `*.css`（`theme.css` 優先、其餘按檔名），不解析 `theme.json`。所以被你在
+> `styles` 裡排除的檔案，仍可能影響啟動畫布的顏色。
+>
+> **複製內建主題。** `bundled: true`（或作者是 `Brisk Launcher`）代表這是啟動器自己的主題；之後
+> 啟動器更新且內建版本改變時，可能會覆蓋它的 `theme.json` / `theme.css`。想保留修改請拿掉這個標記
+> 並改作者。
 
 ### 5. CSS 是怎麼套上去的
 
@@ -704,8 +750,10 @@ data/themes/my-theme/
 
 ### 6. 背景圖
 
-* 格式 PNG / JPG / JPEG / WEBP，**上限 16 MB**。
-* 固定在視窗最底層，內容區仍保留自己的底色（所以卡片和清單不會糊在圖上）。
+* 格式 PNG / JPG / JPEG / WEBP，**上限 16 MB**，且解碼前必須通過 `ImageGuard`
+  （單邊 ≤ 8192、總像素 ≤ 3300 萬）；不通過會被丟棄並顯示警告。
+* 固定在視窗；有背景圖時啟動器會把頁面/內容層設為透明，讓圖透出來；卡片、清單、輸入框仍保留
+  自己的底色，所以文字可讀。換句話說：**頁面**變成圖的背景，**卡片**維持不透明。
 * 四角圓角、壓暗都由啟動器處理（`backgroundDim`）。
 * 大圖建議 1920×1080 以內；4K PNG 主要是在拖慢啟動。
 
@@ -722,6 +770,9 @@ data/themes/my-theme/
 * 含 `@font-face`；
 * 單檔超過 2 MB；
 * `styles` 裡的路徑跳出主題資料夾（例如 `"../x.css"`）。
+
+背景圖與 logo 也會在解碼前檢查：背景 ≤ 16 MB，且必須通過 `ImageGuard`（單邊 ≤ 8192、
+總像素 ≤ 3300 萬）。過大或解不出來的圖會被丟棄並顯示警告，避免 16 MB 壓縮圖在啟動時展開成 GB 級。
 
 被拒絕時主題**仍會留在清單裡並顯示警告**，不會靜悄悄失效 —— 主題看起來沒生效時先看
 **設定 → 外觀**。
@@ -771,9 +822,9 @@ theme.name();        // 目前語言的名字
 
 | 現象 | 原因 / 處理 |
 |---|---|
-| 下拉裡沒有這個主題 | 不在 `data/themes/` 下、資料夾裡既沒有 `*.css` 也沒有 `theme.json`/`pack.properties`、或佔用了 `default` |
+| 下拉裡沒有這個主題 | 不在 `data/themes/` 下、資料夾裡既沒有 `*.css` 也沒有 `theme.json`/`pack.properties`、或佔用了 `default`（會被刻意忽略） |
 | 有列出但介面沒變 | CSS 被安全檢查拒絕（設定頁有警告）；也檢查 `theme.json` 是否 JSON 寫壞（寫壞只丟中介資料，不影響 CSS） |
-| 背景圖不顯示 | 內容區是不透明的，只有視窗底層能看到圖；檢查 `background` 指定的檔名與副檔名 |
+| 背景圖不顯示 | 只有通過檢查的背景才會讓頁面層變透明；檢查檔名/副檔名、16 MB 上限與 `ImageGuard`（單邊 ≤ 8192、≤ 3300 萬像素） |
 | 深色主題字看不清 | 改 `-brisk-text*` 系列；也檢查 `-brisk-on-accent`（強調色按鈕上的文字） |
 | 切換主題後控件還是薄荷綠 | 這個主題在覆蓋選擇器而不是 `-brisk-*` 變數 —— 改成覆蓋變數（附錄 A） |
 | 深色主題按鈕上的字看不見 | `-brisk-on-accent` 要和 `-brisk-accent` / `-brisk-accent-strong` 形成對比 |
@@ -785,7 +836,7 @@ theme.name();        // 目前語言的名字
 ### 15. 附錄 A / B
 
 - **設計變數清單（40 個，建議從這裡開始）**：英文段 **§15 Appendix A**。
-- **CSS 選擇器清單（149 個，需要細調時用）**：英文段 **§16 Appendix B**。
+- **CSS 選擇器清單（149 條列項 / 169 個 selector，需要細調時用）**：英文段 **§16 Appendix B**。
 - 選擇器原始規則在 `src/main/resources/styles/mcl-theme.css`，可以直接對照。
 
 ---

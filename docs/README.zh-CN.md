@@ -17,7 +17,11 @@
 
 插件就是一个放在 `data\plugins\` 下的 jar，可以加工具面板、导航页、自己的语言包、自己的配置目录、
 给别的插件用的服务，甚至账号认证实现。API 参考、`plugin.json` 格式、生命周期、打包与可运行示例见
-**[插件开发指南 →](PLUGIN_DEV.md)** · [示例插件](../examples/hello-plugin/)
+**[插件开发指南 →](PLUGIN_DEV.md)** ·
+**[API 签名 →](PLUGIN_API.md#简体中文)** · [示例插件](../examples/hello-plugin/)
+
+> 第三方插件与主题由使用者自行承担风险。启动器会在第一次载入第三方插件前提示，但没有沙箱，
+> 也没有逐项权限模型。
 
 ## 主题开发
 
@@ -44,16 +48,18 @@ gradle bootExe
 - 发版：GitHub Release **只上传** `BriskLauncher.exe`；内置更新器下载的也是这个 exe，退出后自动替换自己。
 ## 数据位置
 
-除了账号清单，所有运行期数据都在 exe 旁边（便携）：
+游戏数据（主题、语言包、插件、下载的 JRE）在 exe 旁边（便携）。启动器私有文件 —— 账号清单、
+会话令牌、`launcher.json`、日志、信任/确认记录 —— 在 `%LOCALAPPDATA%\BriskLauncher\`：
 
 | 路径 | 内容 |
 |---|---|
 | `runtime/lib/` | 首次启动从 exe 里释放出来的 jar（自动复用、自动清理旧版本） |
-| `data/` | 启动器设置、主题、语言包、插件、日志、缓存 |
+| `data/` | 主题、语言包、插件、`plugin-data/`、缓存、下载的 JRE |
 | `minecraft/` | 内置游戏目录（`versions/<id>/`） |
-| `%LOCALAPPDATA%\BriskLauncher\` | `accounts.json` 与会话令牌（同一个 Windows 用户的所有启动器副本共用） |
+| `%LOCALAPPDATA%\BriskLauncher\` | `accounts.json`、会话令牌、`launcher.json`、`secret.key`、`acks.json`、`plugin-trust.json`、`logs/` —— 同一个 Windows 用户的所有启动器副本共用 |
 
-账号不在 `data/` 里，所以把 exe 换到别的目录运行也还是同一份账号。
+私有文件不在 `data/` 里，所以把 exe 换到别的目录运行也还是同一份账号与设置。日志每次启动一个文件
+（`logs/yyyy-MM-dd-HHmmss.log`），不是轮转的 `launcher.log`。
 ## 许可证
 
 见 [LICENSE](../LICENSE)。
