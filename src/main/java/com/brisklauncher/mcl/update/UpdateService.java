@@ -1,12 +1,12 @@
 package com.brisklauncher.mcl.update;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.brisklauncher.mcl.AppPaths;
 import com.brisklauncher.mcl.download.DownloadTask;
 import com.brisklauncher.mcl.download.HttpDownloader;
 import com.brisklauncher.mcl.net.Http;
 import com.brisklauncher.mcl.security.SafeLog;
 import com.brisklauncher.mcl.setting.LauncherSettings;
+import com.brisklauncher.mcl.util.BuildInfo;
 
 import java.net.URI;
 import java.nio.file.Path;
@@ -23,7 +23,8 @@ import java.util.function.Consumer;
  * <ul>
  *   <li>只读 release 资讯（版本号、说明、资产清单），不偷偷替换自己的 exe；</li>
  *   <li>有新版本 → 弹窗显示版本与说明，玩家自己点「打开下载页」或「下载到本地」；</li>
- *   <li>下载到 {@code <data>/updates/}，下完打开资料夹，由玩家自己覆盖（启动器在执行时无法安全替换自身）。</li>
+ *   <li>下载到 {@code <data>/updates/downloads/<version>/}（按版本隔离），下完打开资料夹，
+ *       由玩家自己覆盖（启动器在执行时无法安全替换自身）。</li>
  * </ul>
  *
  * <p>仓库地址留空时不检查（等使用者提供）。{@code updateRepo} 接受 {@code owner/repo} 或完整网址。
@@ -31,7 +32,7 @@ import java.util.function.Consumer;
 public final class UpdateService {
 
     /** 目前版本（與 build.gradle / pom.xml 保持一致）。 */
-    public static final String CURRENT_VERSION = "1.1.5";
+    public static final String CURRENT_VERSION = BuildInfo.version();
 
     private static final Duration TIMEOUT = Duration.ofSeconds(20);
 
@@ -180,19 +181,28 @@ public final class UpdateService {
         return best;
     }
 
-    /** 下載某個資產到 {@code <data>/updates/}。 */
-    public static Path download(Asset asset, HttpDownloader downloader,
+    /**
+     * 下載某個資產到指定目錄。
+     *
+     * <p>目錄由呼叫方按版本隔離（{@code <data>/updates/downloads/<version>}）。下載前一律
+     * 刪掉同名舊檔：上一個版本的 exe 通常同名、大小也常常很接近，而
+     * {@link HttpDownloader} 會把「大小相符的既有檔案」視為已完成而直接跳過，
+     * 結果把舊 exe 當成新版本套用（或在校驗時才失敗）。
+     */
+    public static Path download(Asset asset, Path directory, HttpDownloader downloader,
                                 Consumer<Double> progress) throws Exception {
         if (asset == null || asset.url() == null || asset.url().isBlank()) {
             throw new IllegalArgumentException("没有可下载的档案");
         }
-        Path dir = AppPaths.dataDir().resolve("updates");
+        Path dir = directory.toAbsolutePath().normalize();
         java.nio.file.Files.createDirectories(dir);
         String name = asset.name() == null || asset.name().isBlank()
                 ? "brisk-launcher-update.zip" : asset.name();
         // 安全审计 L9：资产名来自远端 JSON，只能取 basename
         Path target = com.brisklauncher.mcl.security.PathSafety.resolveUnder(
                 dir, com.brisklauncher.mcl.security.PathSafety.safeFileName(name));
+        // 舊檔一定要先刪：HttpDownloader.alreadySatisfied() 只比大小，同名同大小的舊 exe 會被跳過
+        java.nio.file.Files.deleteIfExists(target);
         // 上游没给 size 时 ratio 只能算 0 或 1（进度条看着像卡住）→ 先发一个「不定长」让界面转圈
         if (progress != null && asset.size() <= 0) {
             progress.accept(-1.0);

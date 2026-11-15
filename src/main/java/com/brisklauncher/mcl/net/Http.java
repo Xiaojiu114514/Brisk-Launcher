@@ -3,6 +3,7 @@ package com.brisklauncher.mcl.net;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.brisklauncher.mcl.security.SafeLog;
+import com.brisklauncher.mcl.util.BuildInfo;
 
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
@@ -37,8 +38,8 @@ import java.security.cert.X509Certificate;
  */
 public final class Http {
 
-    private static final String USER_AGENT =
-            "BriskLauncher/1.1.5 (Minecraft launcher; +https://github.com/brisklauncher/brisk-launcher)";
+    private static final String USER_AGENT = BuildInfo.userAgent()
+            + " (Minecraft launcher; +https://github.com/brisklauncher/brisk-launcher)";
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private static volatile HttpClient client;

@@ -1,6 +1,7 @@
 package com.brisklauncher.mcl.download.remote;
 
 import com.brisklauncher.mcl.security.SafeLog;
+import com.brisklauncher.mcl.util.BuildInfo;
 import com.brisklauncher.mcl.util.CurseForgeKey;
 
 import java.net.URI;
@@ -337,7 +338,7 @@ public final class CurseForgeClient {
             }
             HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(requestUrl))
                     .header("Accept", "application/json")
-                    .header("User-Agent", "BriskLauncher/1.1.5 (CurseForge)")
+                    .header("User-Agent", BuildInfo.userAgent() + " (CurseForge)")
                     .timeout(TIMEOUT)
                     .GET();
             if (endpoint.official()) {
@@ -453,7 +454,7 @@ public final class CurseForgeClient {
             }
             HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(requestUrl))
                     .header("Accept", "application/json")
-                    .header("User-Agent", "BriskLauncher/1.1.5 (CurseForge)")
+                    .header("User-Agent", BuildInfo.userAgent() + " (CurseForge)")
                     .timeout(TIMEOUT)
                     .GET();
             if (endpoint.official()) {

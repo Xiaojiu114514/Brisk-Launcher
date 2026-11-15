@@ -6,7 +6,8 @@
 
     <groupId>com.brisklauncher</groupId>
     <artifactId>mcl</artifactId>
-    <version>1.1.5</version>
+    <!-- 發行版號以 gradle.properties 的 version 為準；Maven 只用來快速編譯，不參與 exe 打包。 -->
+    <version>1.1.6</version>
     <packaging>jar</packaging>
     <name>Brisk Launcher</name>
 

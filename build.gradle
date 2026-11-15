@@ -19,7 +19,7 @@ plugins {
 }
 
 group = 'com.brisklauncher'
-version = '1.1.5'
+// version 來自 gradle.properties（發行版號唯一來源），不要在這裡再寫死。
 
 java {
     toolchain {
@@ -375,6 +375,9 @@ def generateBuildInfo = tasks.register('generateBuildInfo') {
     def outFile = outDir.map { it.file('brisk-build.properties') }
     inputs.property('microsoft.client.id', clientIdValue)
     inputs.property('curseforge.api.key', curseforgeKeyValue)
+    // 版號也要算輸入，否則改了 gradle.properties 這個 task 會 UP-TO-DATE，
+    // jar 裡的 build.version 還是上一版。
+    inputs.property('build.version', project.version.toString())
     outputs.file(outFile)
     doLast {
         def f = outFile.get().asFile

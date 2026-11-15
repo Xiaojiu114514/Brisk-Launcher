@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.brisklauncher.mcl.net.Http;
 import com.brisklauncher.mcl.net.HttpException;
 import com.brisklauncher.mcl.security.SafeLog;
+import com.brisklauncher.mcl.util.BuildInfo;
 
 import java.net.URI;
 import java.net.URLEncoder;
@@ -49,8 +50,8 @@ public final class ModrinthClient {
             OFFICIAL_BASE,
             "https://mod.mcimirror.top/modrinth/v2");
 
-    private static final String USER_AGENT =
-            "BriskLauncher/1.1.5 (contact: github.com/brisklauncher/brisk-launcher)";
+    private static final String USER_AGENT = BuildInfo.userAgent()
+            + " (contact: github.com/brisklauncher/brisk-launcher)";
     private static final Duration TIMEOUT = Duration.ofSeconds(20);
 
     public record Project(String id, String slug, String title, String description,

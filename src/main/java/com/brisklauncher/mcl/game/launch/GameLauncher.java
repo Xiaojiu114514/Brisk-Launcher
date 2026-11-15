@@ -11,6 +11,7 @@ import com.brisklauncher.mcl.game.Rules;
 import com.brisklauncher.mcl.skin.SkinManager;
 import com.brisklauncher.mcl.java.JavaManager;
 import com.brisklauncher.mcl.java.JdkInfo;
+import com.brisklauncher.mcl.util.BuildInfo;
 import com.brisklauncher.mcl.game.GameInstance;
 import com.brisklauncher.mcl.game.GameVersionMerger;
 import com.brisklauncher.mcl.game.InstanceSettings;
@@ -77,7 +78,7 @@ public final class GameLauncher {
     private static final Pattern PLACEHOLDER = Pattern.compile("\\$\\{[^}]+}");
     private static final DateTimeFormatter LOG_TIME = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
     private static final String LAUNCHER_NAME = "BriskLauncher";
-    private static final String LAUNCHER_VERSION = "1.1.5";
+    private static final String LAUNCHER_VERSION = BuildInfo.version();
     /** 数 mods 时的上限（只用来分档，不需要精确值）。 */
     private static final int MOD_COUNT_CAP = 255;
 

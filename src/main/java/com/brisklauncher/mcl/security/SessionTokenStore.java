@@ -8,8 +8,10 @@ import com.brisklauncher.mcl.auth.api.StoredSession;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -24,11 +26,12 @@ import java.util.UUID;
  * 所以只要玩家有两个数据目录（例如：旧的文件夹版在 %LOCALAPPDATA%，新的单 exe 版在 exe 旁边），
  * 另一个实例的凭据就会被当成「无法对应到账号的残留」，弹窗叫人清除 —— 清完那个实例的账号就掉登录。
  *
- * <p>现在凭据名是 {@code MCL/account/<实例id>/<uuid>}：实例 id 存在数据目录里的
- * {@code instance-id.txt}，跟着数据目录走（整个目录搬走也还是同一个 id），
- * 所以两个实例互不干扰，孤儿判定只看自己这一份。
+ * <p>现在凭据名是 {@code MCL/account/<实例id>/<uuid>}：实例 id 与 {@code accounts.json}
+ * 放在同一个共享账号目录（{@link AppPaths#accountsDir()}），所以不同 exe 路径共用同一份
+ * 凭据命名空间；加密密钥 {@code secret.key} 也已搬到同一目录（见 {@link SecretBox}）。
  *
- * <p>兼容：老的 {@code MCL/account/<uuid>} 仍然会读；只有「没有其他实例认领」时才会被当作孤儿。
+ * <p>兼容：老的 {@code MCL/account/<uuid>}、旧安装目录里的 {@code instance-id.txt}
+ * 仍会作为回退目标读取；读到后用共享实例 id + 主密钥重写一次。孤儿判定只看本实例这一份。
  */
 public final class SessionTokenStore {
 
@@ -131,10 +134,18 @@ public final class SessionTokenStore {
     }
 
     public Optional<StoredSession> load(String uuid) {
-        Optional<char[]> raw = store.get(target(uuid));
+        String primary = target(uuid);
+        Optional<char[]> raw = store.get(primary);
+        String usedTarget = primary;
         if (raw.isEmpty()) {
-            // 兼容旧格式（升级后第一次启动）；读到之后由 save() 迁移成新格式
-            raw = store.get(legacyTarget(uuid));
+            // 兼容旧格式（没有实例 id）与旧安装路径的实例 id
+            for (String candidate : legacyTargets(uuid)) {
+                raw = store.get(candidate);
+                if (raw.isPresent()) {
+                    usedTarget = candidate;
+                    break;
+                }
+            }
         }
         if (raw.isEmpty()) {
             return Optional.empty();
@@ -142,24 +153,71 @@ public final class SessionTokenStore {
         char[] chars = raw.get();
         try {
             String rawText = new String(chars);
+            boolean fallbackKey = false;
             if (SecretBox.isEncrypted(rawText)) {
-                rawText = SecretBox.decrypt(rawText);
+                SecretBox.Decrypted decrypted = SecretBox.decryptDetailed(rawText);
+                rawText = decrypted.text();
+                fallbackKey = decrypted.usedFallbackKey();
             }
             Map<String, Object> map = mapper.readValue(rawText, Map.class);
-            return Optional.of(new StoredSession(
+            StoredSession session = new StoredSession(
                     AccountType.valueOf(String.valueOf(map.get("type"))),
                     String.valueOf(map.get("uuid")),
                     String.valueOf(map.get("name")),
                     toChars(map.get("refreshToken")),
                     toChars(map.get("accessToken")),
                     ((Number) map.getOrDefault("expiresAt", 0L)).longValue(),
-                    map.get("endpoint") == null ? null : String.valueOf(map.get("endpoint"))));
+                    map.get("endpoint") == null ? null : String.valueOf(map.get("endpoint")));
+            // 舊版每個 exe 路徑有自己的 secret.key / instance-id；讀到舊目標或舊金鑰就
+            // 用共享帳號目錄的實例 id + 主金鑰重寫一次，換路徑啟動才不會再提示令牌失效。
+            if (!usedTarget.equals(primary) || fallbackKey) {
+                try {
+                    save(session);
+                    if (!usedTarget.equals(primary)) {
+                        store.delete(usedTarget);
+                    }
+                } catch (Exception ignored) {
+                    // 憑據管理器不可寫時仍然讓這次會話可用
+                }
+            }
+            return Optional.of(session);
         } catch (Exception e) {
             SafeLog.warn("会话解析失败，已丢弃");
             return Optional.empty();
         } finally {
             Arrays.fill(chars, '\0');
         }
+    }
+
+    /**
+     * 舊版可能用過的憑據目標名：沒有實例 id 的舊格式，以及安裝目錄裡殘留的舊 instance-id。
+     *
+     * <p>只讀本機安裝目錄的 {@code instance-id.txt}（不會枚舉憑據管理器）；找到後
+     * {@link #load(String)} 會把令牌重寫成共享實例 id + 主金鑰。
+     */
+    private List<String> legacyTargets(String uuid) {
+        List<String> targets = new ArrayList<>();
+        targets.add(legacyTarget(uuid));
+        for (Path file : List.of(
+                AppPaths.launcherRoot().resolve("instance-id.txt"),
+                AppPaths.dataDir().resolve("instance-id.txt"))) {
+            try {
+                if (!Files.isRegularFile(file)) {
+                    continue;
+                }
+                String id = Files.readString(file, StandardCharsets.UTF_8).trim();
+                if (id.isEmpty() || id.equals(instanceId)) {
+                    continue;
+                }
+                String candidate = TARGET_PREFIX + id + "/" + uuid;
+                if (!targets.contains(candidate)) {
+                    targets.add(candidate);
+                }
+            } catch (Exception ignored) {
+                // 讀不到就跳過
+            }
+        }
+        return targets;
     }
 
     public void delete(String uuid) {

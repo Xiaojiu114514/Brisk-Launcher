@@ -125,7 +125,7 @@ public final class UpdateInstaller {
             throw new IOException("这个版本没有提供可自动覆盖的更新包（exe / zip）");
         }
         sink.accept(new InstallProgress(InstallProgress.Stage.UPDATE_DOWNLOAD, 0, asset.name()));
-        Path zip = UpdateService.download(asset, downloader, ratio -> sink.accept(
+        Path zip = UpdateService.download(asset, downloadDir(release.version()), downloader, ratio -> sink.accept(
                 new InstallProgress(InstallProgress.Stage.UPDATE_DOWNLOAD,
                         clamp(ratio), asset.name())));
         checkCancelled();
@@ -507,6 +507,45 @@ public final class UpdateInstaller {
             } catch (Exception ignored) {
                 // 没有暂存目录
             }
+            // 新版按版本放在 downloads/<version>/；旧版清理同样只看 7 天前
+            Path downloads = updates.resolve("downloads");
+            try (var stream = Files.list(downloads)) {
+                for (Path dir : stream.toList()) {
+                    if (!Files.isDirectory(dir)) {
+                        continue;
+                    }
+                    try {
+                        if (now - Files.getLastModifiedTime(dir).toMillis() > 7L * 24 * 3600_000) {
+                            deleteTree(dir);
+                        }
+                    } catch (Exception ignored) {
+                        // 单一目录失败不影响其它
+                    }
+                }
+            } catch (Exception ignored) {
+                // 没有下载目录
+            }
+            // 舊版直接把 exe/zip 放在 updates 根目錄；新流程不再使用，超过 7 天清掉
+            try (var stream = Files.list(updates)) {
+                for (Path file : stream.toList()) {
+                    if (!Files.isRegularFile(file)) {
+                        continue;
+                    }
+                    String name = file.getFileName().toString().toLowerCase(Locale.ROOT);
+                    if (!name.endsWith(".exe") && !name.endsWith(".zip")) {
+                        continue;
+                    }
+                    try {
+                        if (now - Files.getLastModifiedTime(file).toMillis() > 7L * 24 * 3600_000) {
+                            Files.deleteIfExists(file);
+                        }
+                    } catch (Exception ignored) {
+                        // 被占用就下次再清
+                    }
+                }
+            } catch (Exception ignored) {
+                // 忽略
+            }
             try (var stream = Files.list(updates)) {
                 List<Path> backups = stream
                         .filter(file -> Files.isDirectory(file)
@@ -531,6 +570,11 @@ public final class UpdateInstaller {
             }
             return new String(in.readAllBytes(), StandardCharsets.UTF_8);
         }
+    }
+
+    /** {@code <data>/updates/downloads/<version>/}：按版本隔离，旧版同名 exe 不会被误当成已下载。 */
+    private static Path downloadDir(String version) {
+        return AppPaths.dataDir().resolve("updates").resolve("downloads").resolve(safeName(version));
     }
 
     private static Path stagingDir(String version) {

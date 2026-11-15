@@ -462,6 +462,84 @@ public final class MCLDialog {
     }
 
     /**
+     * Markdown 内容弹窗（更新说明用）：header/footer 是纯文本，markdown 渲染成可滚动内容。
+     *
+     * @param actionText 非 null 时显示「取消 + action」；null 时只有「确定」
+     * @param onAction   点 action 后执行（会自动排到下一轮事件循环）
+     */
+    public static void markdown(Window owner, String title, String header, String markdown,
+                                String footer, String actionText, Runnable onAction) {
+        Stage dialog = themedStage(owner);
+
+        Label titleLabel = new Label("✦ " + title);
+        titleLabel.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: -brisk-text;");
+
+        Label headerLabel = new Label(header == null ? "" : header);
+        headerLabel.setWrapText(true);
+        headerLabel.setMaxWidth(560);
+        headerLabel.setStyle("-fx-text-fill: -brisk-text-muted; -fx-font-size: 13px;");
+        headerLabel.setVisible(header != null && !header.isBlank());
+        headerLabel.setManaged(headerLabel.isVisible());
+
+        ScrollPane scroll = MarkdownView.create(markdown, 430);
+
+        Label footerLabel = new Label(footer == null ? "" : footer);
+        footerLabel.setWrapText(true);
+        footerLabel.setMaxWidth(560);
+        footerLabel.getStyleClass().add("cat-hint");
+        footerLabel.setVisible(footer != null && !footer.isBlank());
+        footerLabel.setManaged(footerLabel.isVisible());
+
+        Button closeButton = com.brisklauncher.mcl.ui.UiKit.closeButtonStyled();
+        closeButton.getStyleClass().addAll("window-button", "window-close");
+        closeButton.setOnAction(e -> dialog.close());
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+        HBox headerRow = new HBox(titleLabel, spacer, closeButton);
+        headerRow.setAlignment(Pos.CENTER_LEFT);
+
+        HBox buttons = new HBox(10);
+        buttons.setAlignment(Pos.CENTER_RIGHT);
+
+        String raw = markdown == null ? "" : markdown;
+        if (!raw.isBlank()) {
+            Button copy = new Button(I18n.t("common.copy"));
+            copy.getStyleClass().add("button");
+            copy.setOnAction(e -> {
+                ClipboardContent content = new ClipboardContent();
+                content.putString(raw);
+                Clipboard.getSystemClipboard().setContent(content);
+                copy.setText(I18n.t("common.copied"));
+            });
+            buttons.getChildren().add(copy);
+        }
+        if (actionText != null) {
+            Button cancel = new Button(I18n.t("common.cancel"));
+            cancel.getStyleClass().add("button");
+            cancel.setOnAction(e -> dialog.close());
+            Button ok = new Button(actionText);
+            ok.getStyleClass().add("primary-button");
+            ok.setOnAction(e -> {
+                dialog.close();
+                if (onAction != null) {
+                    javafx.application.Platform.runLater(onAction);
+                }
+            });
+            buttons.getChildren().addAll(cancel, ok);
+        } else {
+            Button ok = new Button(I18n.t("common.ok"));
+            ok.getStyleClass().add("primary-button");
+            ok.setOnAction(e -> dialog.close());
+            buttons.getChildren().add(ok);
+        }
+
+        VBox root = new VBox(12, headerRow, headerLabel, scroll, footerLabel, buttons);
+        root.setPrefWidth(640);
+        decorate(dialog, root);
+        dialog.showAndWait();
+    }
+
+    /**
      * 目前正在显示的「应用程式模态」视窗（安装/下载进度框）。
      *
      * <p>用它当 owner，弹出的确认框才不会被模态框挡住。

@@ -2,6 +2,7 @@ package com.brisklauncher.mcl.download;
 
 import com.brisklauncher.mcl.net.Http;
 import com.brisklauncher.mcl.security.SafeLog;
+import com.brisklauncher.mcl.util.BuildInfo;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -220,7 +221,7 @@ public final class HttpDownloader implements AutoCloseable {
     private void fetch(URI uri, Path temp, AtomicLong bytesDone, Runnable onByteProgress) throws IOException {
         try {
             HttpRequest request = HttpRequest.newBuilder(uri)
-                    .header("User-Agent", "BriskLauncher/1.1.5")
+                    .header("User-Agent", BuildInfo.userAgent())
                     .header("Accept", "*/*")
                     .timeout(Duration.ofMinutes(3))
                     .GET()

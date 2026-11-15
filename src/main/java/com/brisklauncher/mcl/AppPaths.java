@@ -327,9 +327,14 @@ public final class AppPaths {
         }
     }
 
-    /** 私密小文件：密钥（仅当前用户可读）。 */
+    /**
+     * 私密小文件：静态加密密钥（仅当前用户可读）。
+     *
+     * <p>跟 {@link #accountsFile()} 放在同一个共享账号目录：令牌存在 Windows 凭据管理器里，
+     * 而凭据名与加密密钥都必须跨 exe 路径共用，否则换一个目录启动就解不开另一份令牌。
+     */
     public static Path secretFile() {
-        return launcherRoot().resolve("secret.key");
+        return accountsDir().resolve("secret.key");
     }
 
     /** 私密小文件：风险确认记录（放在私密目录后才具备「一次确认长期有效」的语义）。 */

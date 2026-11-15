@@ -36,8 +36,11 @@ public final class UpdateFlow {
         if (!UpdateInstaller.supported()) {
             // 开发执行 / 安装目录不可写：不能覆盖自己，只能请玩家开下载页
             if (userInitiated) {
-                MCLDialog.confirm(owner, I18n.t("update.available_title"),
-                        I18n.t("update.unsupported_body", version, notes(release)),
+                MCLDialog.markdown(owner, I18n.t("update.available_title"),
+                        I18n.t("update.unsupported_header", version),
+                        notes(release),
+                        I18n.t("update.unsupported_footer"),
+                        I18n.t("common.confirm"),
                         () -> DesktopActions.openUrl(release.pageUrl()));
             } else {
                 com.brisklauncher.mcl.security.SafeLog.info(
@@ -60,9 +63,11 @@ public final class UpdateFlow {
             startInstall(owner, context, release);
             return;
         }
-        MCLDialog.confirm(owner, I18n.t("update.available_title"),
-                I18n.t("update.install_body", version,
-                        UpdateService.CURRENT_VERSION, notes(release)),
+        MCLDialog.markdown(owner, I18n.t("update.available_title"),
+                I18n.t("update.install_header", version, UpdateService.CURRENT_VERSION),
+                notes(release),
+                I18n.t("update.install_footer"),
+                I18n.t("common.confirm"),
                 () -> startInstall(owner, context, release));
     }
 
@@ -89,12 +94,9 @@ public final class UpdateFlow {
                 });
     }
 
-    /** release notes 太长会把弹窗撑爆，截断成固定长度。 */
+    /** 完整显示 release notes（Markdown 由弹窗渲染）；空内容给一个占位文案。 */
     private static String notes(UpdateService.Release release) {
         String notes = release.notes() == null ? "" : release.notes().trim();
-        if (notes.length() > 400) {
-            notes = notes.substring(0, 400) + "…";
-        }
-        return notes;
+        return notes.isEmpty() ? I18n.t("update.no_notes") : notes;
     }
 }
