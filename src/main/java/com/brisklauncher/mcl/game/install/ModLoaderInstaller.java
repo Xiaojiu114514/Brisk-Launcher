@@ -634,7 +634,7 @@ public final class ModLoaderInstaller {
             throw new InstallException(label + " 安装器需要 Java " + major
                     + "，但自动补齐失败：" + oneLine(error.getMessage())
                     + "\n\n可在「设定 → Java 与记忆体」手动指定 Java，"
-                    + "或确认网路可连到 Adoptium（adoptium.net）。", error);
+                    + "或确认网路可连到 Oracle 下载站（download.oracle.com）或 Adoptium 镜像。", error);
         }
     }
 

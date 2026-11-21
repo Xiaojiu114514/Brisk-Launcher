@@ -168,11 +168,26 @@ public final class HttpDownloader implements AutoCloseable {
 
     /** 单文件下载：下载一个文件并等待完成，失败直接抛出。 */
     public void downloadOne(DownloadTask task) {
+        downloadOne(task, done -> { });
+    }
+
+    /**
+     * 单文件下载，并把「已下载字节数」回报给调用方（Java 安装包这类大文件要显示进度）。
+     *
+     * <p>回调在**调用线程**上同步执行（{@link #downloadOne} 本身不切线程），
+     * 调用方不需要额外做线程同步。
+     */
+    public void downloadOne(DownloadTask task, java.util.function.LongConsumer onBytes) {
+        java.util.function.LongConsumer safe = onBytes == null ? done -> { } : onBytes;
         try {
             if (task.alreadySatisfied()) {
+                if (task.size() > 0) {
+                    safe.accept(task.size());
+                }
                 return;
             }
-            download(task, new AtomicLong(), () -> { });
+            AtomicLong done = new AtomicLong();
+            download(task, done, () -> safe.accept(done.get()));
         } catch (IOException e) {
             throw new DownloadException(e.getMessage() == null ? "下载失败" : e.getMessage(), 1);
         }
@@ -186,13 +201,17 @@ public final class HttpDownloader implements AutoCloseable {
             List<URI> mirrors = HostHealth.sorted(task.mirrors());
             for (int attempt = 0; attempt <= retries; attempt++) {
                 for (URI mirror : mirrors) {
+                    // 每次尝试单独计数：失败时把这个 attempt 已写入的字节从总进度扣回去，
+                    // 否则「断线重试」会让进度显示成 240 MB / 190 MB（第 199 轮实测）。
+                    AtomicLong attemptBytes = new AtomicLong();
                     try {
-                        fetch(mirror, temp, bytesDone, onByteProgress);
+                        fetch(mirror, temp, bytesDone, attemptBytes, onByteProgress);
                         verify(temp, task);
                         move(temp, task.destination());
                         HostHealth.success(mirror);
                         return;
                     } catch (IOException e) {
+                        bytesDone.addAndGet(-attemptBytes.get());
                         last = e;
                         HostHealth.failure(mirror);
                         if (Thread.currentThread().isInterrupted()) {
@@ -218,7 +237,8 @@ public final class HttpDownloader implements AutoCloseable {
         }
     }
 
-    private void fetch(URI uri, Path temp, AtomicLong bytesDone, Runnable onByteProgress) throws IOException {
+    private void fetch(URI uri, Path temp, AtomicLong bytesDone, AtomicLong attemptBytes,
+                       Runnable onByteProgress) throws IOException {
         try {
             HttpRequest request = HttpRequest.newBuilder(uri)
                     .header("User-Agent", BuildInfo.userAgent())
@@ -253,6 +273,7 @@ public final class HttpDownloader implements AutoCloseable {
                     out.write(buffer, 0, read);
                     total += read;
                     bytesDone.addAndGet(read);
+                    attemptBytes.addAndGet(read);
                     onByteProgress.run();
                 }
                 if (total == 0) {

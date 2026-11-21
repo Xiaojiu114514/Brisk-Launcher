@@ -333,6 +333,39 @@ public final class Http {
         return new String(getBytes(uri, timeout), java.nio.charset.StandardCharsets.UTF_8);
     }
 
+    /**
+     * HEAD 请求取 Content-Length（拿不到或服务器不支持 HEAD 时回传 -1）。
+     *
+     * <p>只用于大文件下载前的大小／进度提示，失败不影响下载本身。
+     */
+    public static long headLength(URI uri, Duration timeout) {
+        try {
+            HttpRequest request = HttpRequest.newBuilder(uri)
+                    .header("User-Agent", USER_AGENT)
+                    .method("HEAD", HttpRequest.BodyPublishers.noBody())
+                    .timeout(timeout)
+                    .build();
+            return withDeadline(() -> {
+                HttpResponse<Void> response;
+                try {
+                    response = client().send(request, HttpResponse.BodyHandlers.discarding());
+                } catch (IOException e) {
+                    if (!isSslProblem(e)) {
+                        throw e;
+                    }
+                    SafeLog.warn("TLS 握手失败，改用 TLS 1.2 重试（" + hostOf(uri) + "）");
+                    response = tls12Client().send(request, HttpResponse.BodyHandlers.discarding());
+                }
+                if (response.statusCode() != 200) {
+                    return -1L;
+                }
+                return response.headers().firstValueAsLong("content-length").orElse(-1L);
+            }, timeout.plusSeconds(10), "HEAD");
+        } catch (RuntimeException e) {
+            return -1L;
+        }
+    }
+
     /** POST 一段 JSON，回傳解析後的 JSON（Modrinth 的批量查詢用）。 */
     public static JsonNode postJson(URI uri, String jsonBody, Duration timeout) {
         try {

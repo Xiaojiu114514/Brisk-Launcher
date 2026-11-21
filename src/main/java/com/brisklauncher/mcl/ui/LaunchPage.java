@@ -644,11 +644,25 @@ public final class LaunchPage extends HBox implements MclPage {
                 updateRunningCard();
                 return;
             }
-            Throwable root = error;
+            // 先取「最外层」訊息（我们包好的本地化说明），再附上最深层的 root cause；
+            // 只显示 root cause 会让玩家看到 "Connection timed out: connect" 而不知道该干嘛。
+            Throwable cause = error;
+            while ((cause instanceof java.util.concurrent.CompletionException
+                    || cause instanceof java.util.concurrent.ExecutionException)
+                    && cause.getCause() != null) {
+                cause = cause.getCause();
+            }
+            Throwable root = cause;
             while (root.getCause() != null && root.getCause() != root) {
                 root = root.getCause();
             }
-            String message = root.getMessage() == null ? "未知错误" : root.getMessage();
+            String message = cause.getMessage() == null || cause.getMessage().isBlank()
+                    ? "未知错误" : cause.getMessage();
+            String rootMessage = root.getMessage();
+            if (root != cause && rootMessage != null && !rootMessage.isBlank()
+                    && !message.contains(rootMessage)) {
+                message = message + "\n\n" + rootMessage;
+            }
             com.brisklauncher.mcl.crash.LaunchTimeline.error("启动失败", firstLine(message));
             com.brisklauncher.mcl.crash.LaunchTimeline.absorbLog(
                     entry.gameDir().resolve("logs").resolve("latest.log"), lastLaunchStartedAt);

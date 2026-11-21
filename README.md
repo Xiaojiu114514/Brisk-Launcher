@@ -46,19 +46,19 @@ gradle bootExe
 
 Output: `build\distributions\BriskLauncher.exe` — one self-contained file (~30 MB) with all jars embedded. It extracts them to `runtime/lib/` on first launch and starts the JVM.
 
-- Building needs JDK 21; the produced exe also needs Java 21 at runtime and downloads it to `data/jre` on first launch if missing.
+- Building needs JDK 21; the produced exe also needs Java 21 at runtime and downloads Oracle JDK 21 to `data/jdk` on first launch if missing.
 - Directory build (for development): `gradle installDist`, then `build\install\brisk-launcher\Brisk Launcher.vbs`.
 - Releasing: upload **only** `BriskLauncher.exe` to GitHub Releases. The built-in updater downloads that same exe and replaces itself after the launcher exits.
 ## Data locations
 
-Game data (themes, language packs, plugins, the downloaded JRE) lives next to the exe (portable).
+Game data (themes, language packs, plugins, the downloaded JDK) lives next to the exe (portable).
 Launcher-private files — account list, session tokens, `launcher.json`, logs and the trust/ack records —
 live in `%LOCALAPPDATA%\BriskLauncher\`:
 
 | Path | Contents |
 |---|---|
 | `runtime/lib/` | jars extracted from the exe on first launch; reused and pruned automatically |
-| `data/` | themes, language packs, plugins, `plugin-data/`, cache, downloaded JRE |
+| `data/` | themes, language packs, plugins, `plugin-data/`, cache, downloaded JDK |
 | `minecraft/` | the built-in game directory (`versions/<id>/`) |
 | `%LOCALAPPDATA%\BriskLauncher\` | `accounts.json`, session tokens, `launcher.json`, `secret.key`, `acks.json`, `plugin-trust.json`, `logs/` — shared by every copy of the launcher on this Windows user |
 

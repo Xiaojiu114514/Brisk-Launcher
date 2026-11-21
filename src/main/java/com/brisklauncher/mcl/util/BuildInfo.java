@@ -25,7 +25,7 @@ public final class BuildInfo {
     private BuildInfo() {
     }
 
-    /** 例如 {@code 1.1.6}；建置資源缺失時為 {@code dev}。 */
+    /** 例如 {@code 1.1.7}；建置資源缺失時為 {@code dev}。 */
     public static String version() {
         return VERSION;
     }

@@ -43,18 +43,18 @@ gradle bootExe
 
 產物：`build\distributions\BriskLauncher.exe` —— 一個自帶所有 jar 的單一檔案（約 30 MB），首次啟動會把 jar 釋放到 `runtime/lib/` 再拉起 JVM。
 
-- 建置需要 JDK 21；產生的 exe 執行時也需要 Java 21，缺少時會自動下載到 `data/jre`。
+- 建置需要 JDK 21；產生的 exe 執行時也需要 Java 21，缺少時會自動下載到 `data/jdk`。
 - 目錄版（開發用）：`gradle installDist`，再執行 `build\install\brisk-launcher\Brisk Launcher.vbs`。
 - 發佈：GitHub Release **只上傳** `BriskLauncher.exe`；內建更新器下載的也是這個 exe，結束後自動替換自己。
 ## 資料位置
 
-遊戲資料（主題、語言包、外掛、下載的 JRE）在 exe 旁邊（可攜）。啟動器私有檔案 —— 帳號清單、
+遊戲資料（主題、語言包、外掛、下載的 JDK）在 exe 旁邊（可攜）。啟動器私有檔案 —— 帳號清單、
 工作階段權杖、`launcher.json`、日誌、信任/確認記錄 —— 在 `%LOCALAPPDATA%\BriskLauncher\`：
 
 | 路徑 | 內容 |
 |---|---|
 | `runtime/lib/` | 首次啟動從 exe 裡釋放出來的 jar（自動重用、自動清理舊版本） |
-| `data/` | 主題、語言包、外掛、`plugin-data/`、快取、下載的 JRE |
+| `data/` | 主題、語言包、外掛、`plugin-data/`、快取、下載的 JDK |
 | `minecraft/` | 內建遊戲目錄（`versions/<id>/`） |
 | `%LOCALAPPDATA%\BriskLauncher\` | `accounts.json`、工作階段權杖、`launcher.json`、`secret.key`、`acks.json`、`plugin-trust.json`、`logs/` —— 同一個 Windows 使用者的所有啟動器副本共用 |
 

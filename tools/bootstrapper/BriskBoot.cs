@@ -10,7 +10,7 @@
 // 并删掉不再内嵌的旧 jar —— 升级后不会残留、也不会每版多出 30MB。
 // 旧版曾释放到 %LOCALAPPDATA%\BriskLauncher\runtime\<id>，启动时顺手清掉。
 //
-// 找不到 Java 21 时：自动下到 data\jre（用内嵌的 install-java.ps1，带 SHA-256 校验）。
+// 找不到 Java 21 时：自动下 Oracle JDK 21 到 data\jdk（用内嵌的 install-java.ps1，带 SHA-256 校验）。
 //
 // 编译：build.gradle 的 bootExe 任务（csc.exe）。
 
@@ -117,7 +117,8 @@ internal static class BriskBoot
         {
             MessageBox.Show(
                 "没有找到 Java 21，自动下载也没有成功。\n\n"
-                + "可以手动装一个 64 位 Java 21，或者双击 runtime 目录里的 install-java.ps1。\n"
+                + "原因看这里：data\\logs\\boot\\install-java.log\n"
+                + "可以手动装一个 64 位 Java 21，或双击 runtime 目录里的 install-java.ps1。\n"
                 + "装好后重新双击 BriskLauncher.exe。",
                 "Brisk Launcher", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             Environment.Exit(2);
@@ -437,7 +438,9 @@ internal static class BriskBoot
     private static string FindJava(string exeDir)
     {
         List<string> candidates = new List<string>();
-        // 启动器自己下过的 JRE 优先（跟着 exe 走，换机器也能用）
+        // 启动器自己下过的 JDK 优先（跟着 exe 走，换机器也能用）
+        AddJdkFolders(candidates, Path.Combine(exeDir, "data", "jdk"), true);
+        // 旧版把 Java 装在 data\jre（脚本会多套一层主版本号），仍然认，避免升级后重复下载。
         AddJdkFolders(candidates, Path.Combine(exeDir, "data", "jre"), true);
         string home = Environment.GetEnvironmentVariable("JAVA_HOME");
         if (!string.IsNullOrEmpty(home))
@@ -522,31 +525,35 @@ internal static class BriskBoot
         }
     }
 
-    /// <summary>缺 Java 时：用内嵌的 install-java.ps1 下到 data\jre（脚本自带 SHA-256 校验）。</summary>
+    /// <summary>缺 Java 时：用内嵌的 install-java.ps1 下 Oracle JDK 21 到 data\jdk（脚本自带 SHA-256 校验）。</summary>
     private static string InstallJava(string exeDir, string runtimeDir)
     {
         string script = Path.Combine(runtimeDir, "install-java.ps1");
         if (!File.Exists(script))
         {
+            BootLog("install-java.ps1 不存在：" + script);
             return null;
         }
         DialogResult answer = MessageBox.Show(
-            "第一次启动需要 Java 21，但没有找到。\n\n"
-            + "现在自动下载到 data\\jre（约 180 MB，只需一次）。\n"
+            "第一次启动需要 Java 21（优先 Oracle JDK 21），但没有找到。\n\n"
+            + "现在自动下载到 data\\jdk（约 190 MB，只需一次）。\n"
             + "点确定开始，下载过程中会开一个命令行窗口显示进度。",
             "Brisk Launcher", MessageBoxButtons.OKCancel, MessageBoxIcon.Information);
         if (answer != DialogResult.OK)
         {
+            BootLog("用户取消下载 Java 21");
             return null;
         }
-        string target = Path.Combine(exeDir, "data", "jre");
+        string target = Path.Combine(exeDir, "data", "jdk");
+        BootLog("开始自动安装 Java 21 → " + target);
+        int exitCode = -1;
         try
         {
             ProcessStartInfo info = new ProcessStartInfo
             {
                 FileName = "powershell.exe",
                 Arguments = "-NoProfile -ExecutionPolicy Bypass -File " + Quote(script)
-                        + " -Target " + Quote(target),
+                        + " -Target " + Quote(target) + " -Major 21",
                 UseShellExecute = false,
                 CreateNoWindow = false,
                 WorkingDirectory = exeDir,
@@ -554,14 +561,20 @@ internal static class BriskBoot
             using (Process install = Process.Start(info))
             {
                 install.WaitForExit();
+                exitCode = install.ExitCode;
             }
         }
-        catch (Exception)
+        catch (Exception error)
         {
+            BootLog("调用 install-java.ps1 失败：" + error.Message);
             return null;
         }
-        string java = Path.Combine(target, "bin", "java.exe");
-        return IsJava21OrNewer(java) ? java : null;
+        BootLog("install-java.ps1 结束，退出码 " + exitCode + "；详细日志："
+                + Path.Combine(exeDir, "data", "logs", "boot", "install-java.log"));
+        // 关键：不要假设脚本把 JDK 装到哪一层（现在是 <Target>\<Major>）。
+        // 直接重新扫描一次再决定 —— 旧版这里写死 data\jre\bin\java.exe，
+        // 结果下载成功也判失败、还让用户看到「自动下载没有成功」（第 199 轮）。
+        return FindJava(exeDir);
     }
 
     private static string Quote(string value)

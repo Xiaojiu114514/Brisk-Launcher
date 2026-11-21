@@ -64,7 +64,7 @@ import java.util.zip.ZipInputStream;
  * <ol>
  *   <li>合并继承链上的版本 JSON；</li>
  *   <li>启动前检查文件完整性，缺失就调用 {@link VersionInstaller#repair} 自动补全；</li>
- *   <li>按版本 JSON 的 {@code javaVersion} 选 Java，缺失则自动下载 Temurin；</li>
+ *   <li>按版本 JSON 的 {@code javaVersion} 选 Java，缺失则自动下载 Oracle JDK / Adoptium JDK；</li>
  *   <li>按 rules 过滤 libraries，解压 natives（带签名缓存，避免每次启动重复解压）；</li>
  *   <li>替换全部占位符（含 Forge 的 ${library_directory} / ${classpath_separator}）；</li>
  *   <li>第三方账号注入 authlib-injector，离线账号先写 CSL 皮肤；</li>

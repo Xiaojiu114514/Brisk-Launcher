@@ -250,6 +250,8 @@ tasks.register('bootExe') {
     def source = file('tools/bootstrapper/BriskBoot.cs')
     def icon = file('src/main/resources/icon.ico')
     def splash = file('src/dist/splash.gif')
+    // 缺 Java 时用这个脚本自动下 Oracle JDK 21 到 data\jdk（启动器从 runtime 目录调它）
+    def installJava = file('src/dist/install-java.ps1')
     def outDir = layout.buildDirectory.dir('distributions')
     def buildDir = layout.buildDirectory.dir('boot')
     def exeName = 'BriskLauncher.exe'
@@ -262,6 +264,8 @@ tasks.register('bootExe') {
     inputs.file(source)
     inputs.file(splash)
     inputs.file(icon)
+    // 脚本内容也会被塞进 exe：不算输入的话，改完 install-java.ps1 打包仍是 UP-TO-DATE（第 199 轮）
+    inputs.file(installJava)
     outputs.file(outDir.map { it.file(exeName) })
 
     doLast {
@@ -294,8 +298,6 @@ tasks.register('bootExe') {
             arguments.add('/resource:' + f.absolutePath + ',lib/' + f.name)
         }
         arguments.add('/resource:' + splash.absolutePath + ',splash.gif')
-        // 缺 Java 时用这个脚本自动下到 data\jre（启动器从 runtime 目录调它）
-        def installJava = file('src/dist/install-java.ps1')
         arguments.add('/resource:' + installJava.absolutePath + ',install-java.ps1')
         exec { commandLine([csc.absolutePath] + arguments) }
         logger.lifecycle('single exe: ' + target.absolutePath + ' '

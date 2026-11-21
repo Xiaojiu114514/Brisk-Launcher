@@ -200,7 +200,17 @@ public final class TaskDialog {
       for(rootCause = error; rootCause.getCause() != null && rootCause.getCause() != rootCause; rootCause = rootCause.getCause()) {
       }
 
-      String message = rootCause.getMessage() != null && !rootCause.getMessage().isBlank() ? rootCause.getMessage() : rootCause.getClass().getSimpleName();
+      // 先显示「最外层」訊息：那是我们刻意包好的、已本地化的说明（例如「下载 Java 21 失败：…」）；
+      // 以前只显示最深层的 root cause，玩家看到的是 "Connection timed out: connect" 这种原文。
+      String rootMessage = rootCause.getMessage();
+      String message = error.getMessage() != null && !error.getMessage().isBlank()
+              ? error.getMessage()
+              : (rootMessage != null && !rootMessage.isBlank()
+                      ? rootMessage : rootCause.getClass().getSimpleName());
+      if (rootCause != error && rootMessage != null && !rootMessage.isBlank()
+              && !message.contains(rootMessage)) {
+         message = message + "\n\n" + rootMessage;
+      }
       if (rootCause instanceof AccessDeniedException || message.contains("Access is denied") || message.contains("存取被拒") || message.contains("拒绝访问")) {
          message = message + "\n\n" + I18n.t("task.permission_hint");
       }
